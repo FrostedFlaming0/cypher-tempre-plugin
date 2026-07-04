@@ -86,16 +86,41 @@ consistent; set the ceiling with headroom below your model's context limit.
    cp cypher-tempre.js ~/.config/opencode/plugin/
    ```
 
-3. **Disable built-in compaction** so it never races the truncation — in
-   `~/.config/opencode/opencode.json` (or `.jsonc`):
+3. **Disable built-in compaction** so it never races the truncation, and
+   (optionally) register the skill directory so it appears as a first-class
+   skill in OpenCode's skill tool — in `~/.config/opencode/opencode.json`
+   (or `.jsonc`):
 
    ```jsonc
    {
-     "compaction": { "auto": false }
+     "compaction": { "auto": false },
+     "skills": { "paths": ["~/.opencode/skills"] }
    }
    ```
 
-4. Verify: start a session with `CT_OC_DEBUG=1` and check
+   The `skills.paths` entry is optional — the injected prompt already names
+   the skill by absolute path — but it lets the agent discover the skill
+   natively too.
+
+4. **Keep agent identities separate.** OpenCode ships Claude Code compat
+   features that auto-load `~/.claude/CLAUDE.md` into the system prompt and
+   scan `~/.claude/skills/**` for skills. If a Cypher Tempre skill (or any
+   other agent's instructions) lives under `~/.claude`, the OpenCode agent
+   would discover *that* copy — and its Timechain — instead of its own,
+   violating the one-agent-one-chain boundary. Disable the compat layer in
+   your shell profile:
+
+   ```sh
+   export OPENCODE_DISABLE_CLAUDE_CODE=1
+   ```
+
+   (Narrow variants exist: `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` /
+   `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`.) Note OpenCode has no
+   auto-memory of its own to turn off — unlike Claude Code, whose
+   `autoMemoryEnabled` should be `false` when the Timechain is the single
+   source of truth; these env vars are the OpenCode-side equivalent hygiene.
+
+5. Verify: start a session with `CT_OC_DEBUG=1` and check
    `~/.config/opencode/cypher-tempre.log` for `appended FULL_PRIMING` /
    `messages.transform` lines. End-to-end proof: after a session, run
    `python3 ~/.opencode/skills/cypher-tempre-self-model/timechain.py stat` —
