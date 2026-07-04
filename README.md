@@ -108,14 +108,22 @@ All configuration is via environment variables (read at plugin load):
 | Variable | Default | Effect |
 |---|---|---|
 | `CT_OC_KEEP_TURNS` | `15` | Max full turns kept in the per-request context (plus the pinned first turn) |
-| `CT_OC_TOKEN_CEILING` | `180000` | Approximate token budget for kept turns; truncation starts earlier than `KEEP_TURNS` when exceeded |
+| `CT_OC_TOKEN_CEILING` | `300000` | Approximate token budget for kept turns; truncation starts earlier than `KEEP_TURNS` when exceeded |
 | `CT_OC_SKILL_DIR` | `~/.opencode/skills/cypher-tempre-self-model` | Skill location referenced in the injected prompts |
 | `CT_OC_DISABLE` | unset | `1` disables both hooks (plugin stays loaded, does nothing) |
 | `CT_OC_DEBUG` | unset | `1` appends hook activity to `~/.config/opencode/cypher-tempre.log` |
 
 Sizing `CT_OC_TOKEN_CEILING`: leave headroom below the model's context limit
-for the system prompt, output tokens, and estimator error (roughly ±30%). For a
-225k-context model with 24k output, the 180k default is about right.
+for the system prompt, output tokens, and estimator error (roughly ±30%). The
+300k default suits a 1M-context model with generous headroom; for a
+225k-context model with 24k output, set it around 180k.
+
+Truncation order when the ceiling bites: turns drop **oldest-first** — the
+15th-most-recent turn goes first, then the 14th, and so on toward the present.
+Two turns are exempt: the **first turn of the session** (pinned — never
+dropped; it rides outside the token budget entirely) and the **most recent
+turn** (always kept, even if it alone exceeds the ceiling). Kept turns are
+always contiguous — no holes.
 
 ## Testing
 

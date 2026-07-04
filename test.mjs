@@ -89,6 +89,24 @@ const turn = (userText, assistantCount = 1) => [user([text(userText)]), ...Array
   for (let i = 2; i < out.length; i++) assert.equal(out[i].info.role, "assistant")
 }
 
+// --- truncateMessages: clipping ORDER as the ceiling tightens --------------
+{
+  // 6 equal-weight turns. Progressively lower ceilings must clip oldest-first:
+  // t2 goes first, then t3, ... with t1 (pinned) and t6 (most recent) never clipped.
+  const msgs = [...turn("t1"), ...turn("t2"), ...turn("t3"), ...turn("t4"), ...turn("t5"), ...turn("t6")]
+  const per = 2 * (Math.ceil(JSON.stringify(turn("tX")[0].parts).length / 4) + 20) // user+assistant cost
+  const survivors = (ceiling) =>
+    truncateMessages(msgs, { keepTurns: 15, tokenCeiling: ceiling })
+      .filter((m) => m.info.role === "user")
+      .map((m) => m.parts[0].text)
+  assert.deepEqual(survivors(per * 5.5), ["t1", "t2", "t3", "t4", "t5", "t6"]) // all fit
+  assert.deepEqual(survivors(per * 4.5), ["t1", "t3", "t4", "t5", "t6"]) // t2 clipped first
+  assert.deepEqual(survivors(per * 3.5), ["t1", "t4", "t5", "t6"]) // then t3
+  assert.deepEqual(survivors(per * 2.5), ["t1", "t5", "t6"]) // then t4
+  assert.deepEqual(survivors(per * 1.5), ["t1", "t6"]) // then t5
+  assert.deepEqual(survivors(1), ["t1", "t6"]) // t6 + pinned t1 survive ANY ceiling
+}
+
 // --- hooks end-to-end ------------------------------------------------------
 {
   process.env.CT_OC_DISABLE = ""
