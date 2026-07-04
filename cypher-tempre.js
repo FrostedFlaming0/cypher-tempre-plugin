@@ -15,7 +15,7 @@
  * Knobs (environment):
  *   CT_OC_DISABLE=1        disable both hooks entirely
  *   CT_OC_KEEP_TURNS       max full turns kept in context (default 15)
- *   CT_OC_TOKEN_CEILING    approx token budget for kept turns (default 300000)
+ *   CT_OC_TOKEN_CEILING    approx token budget for kept turns (default 256000)
  *   CT_OC_SKILL_DIR        skill location (default ~/.opencode/skills/cypher-tempre-self-model)
  *   CT_OC_DEBUG=1          append hook activity to ~/.config/opencode/cypher-tempre.log
  */
@@ -25,7 +25,7 @@ import path from "node:path"
 
 const SKILL_DIR = process.env["CT_OC_SKILL_DIR"] || path.join(os.homedir(), ".opencode", "skills", "cypher-tempre-self-model")
 const KEEP_TURNS = intEnv("CT_OC_KEEP_TURNS", 15)
-const TOKEN_CEILING = intEnv("CT_OC_TOKEN_CEILING", 300_000)
+const TOKEN_CEILING = intEnv("CT_OC_TOKEN_CEILING", 256_000)
 const DISABLED = process.env["CT_OC_DISABLE"] === "1"
 const DEBUG = process.env["CT_OC_DEBUG"] === "1"
 const STATE_FILE = path.join(os.homedir(), ".config", "opencode", "cypher-tempre-primed.json")
