@@ -1,7 +1,7 @@
 # Cypher Tempre — OpenCode Plugin
 
 An [OpenCode](https://opencode.ai) plugin that makes an agent **wear the
-[Cypher Tempre self-model](https://github.com/cyberphysicsai/cypher-tempre-genesis)
+[Cypher Tempre self-model](https://github.com/FrostedFlaming0/cypher-tempre-genesis)
 automatically on every session**, and keeps context **lean and free of compaction**
 by truncating to the first turn plus the most recent turns.
 
