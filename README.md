@@ -7,6 +7,11 @@ by truncating to the first user message plus the most recent turns.
 
 Verified against OpenCode 1.17.14.
 
+> **Also in this repo:** [`openclaw/`](openclaw/) — the same wearing + pinned-window
+> design as an [OpenClaw](https://github.com/openclaw/openclaw) plugin, implemented
+> as a context engine (`plugins.slots.contextEngine`) that replaces summarizing
+> compaction outright. See [openclaw/README.md](openclaw/README.md).
+
 ## Why
 
 Two observations drive the design:

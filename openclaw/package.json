@@ -1,0 +1,27 @@
+{
+  "name": "openclaw-cypher-tempre",
+  "version": "0.1.0",
+  "description": "Cypher Tempre self-model integration for OpenClaw: pinned-window context engine plus primer/reminder auto-append.",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "lib/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.6.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": ["./index.js"]
+  },
+  "scripts": {
+    "test": "node --test test.mjs"
+  }
+}

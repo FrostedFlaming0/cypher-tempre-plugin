@@ -1,0 +1,42 @@
+{
+  "id": "cypher-tempre",
+  "name": "Cypher Tempre",
+  "description": "Timechain self-model wearing: pinned-window context engine (first turn + recent turns, no summarizing compaction) plus primer/reminder auto-append.",
+  "contracts": {},
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "keepTurns": {
+        "type": "integer",
+        "minimum": 2,
+        "description": "Maximum recent turns kept in context (including the current turn). Default 15."
+      },
+      "tokenCeiling": {
+        "type": "integer",
+        "minimum": 4000,
+        "description": "Approximate token ceiling for assembled context. Default 256000."
+      },
+      "evictionBatch": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Evict oldest turns in batches of this size (prompt-cache hysteresis). Default 1 = exact minimum eviction."
+      },
+      "primer": {
+        "type": "boolean",
+        "description": "Prepend the full wearing primer to the system prompt on every run. Default true."
+      },
+      "reminder": {
+        "type": "boolean",
+        "description": "Append the short per-turn reminder near the user message. Default true."
+      },
+      "skillDir": {
+        "type": "string",
+        "description": "Path to the cypher-tempre-self-model skill. Default ~/.openclaw/skills/cypher-tempre-self-model."
+      }
+    }
+  }
+}
