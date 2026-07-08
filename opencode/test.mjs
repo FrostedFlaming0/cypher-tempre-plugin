@@ -157,5 +157,37 @@ try {
   delete process.env.CT_OC_STATE_FILE
 }
 
+// --- stampTurnTrajectory ---------------------------------------------------
+{
+  const { stampTurnTrajectory } = CypherTempre.internals
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ct-stamp-"))
+  const fakeDb = path.join(tmp, "opencode.db")
+  fs.writeFileSync(fakeDb, "")                       // existence is all the stamp checks
+  process.env["CT_SESSION_DB"] = fakeDb
+  // pre-existing enforce state must be MERGED, not clobbered
+  const chainDir = path.join(tmp, "chain")
+  fs.mkdirSync(chainDir, { recursive: true })
+  fs.writeFileSync(path.join(chainDir, ".enforce.json"), JSON.stringify({ turn_head: 7 }))
+  stampTurnTrajectory("ses_test", "msg_123", tmp)
+  const st = JSON.parse(fs.readFileSync(path.join(chainDir, ".enforce.json"), "utf8"))
+  assert.equal(st.turn_head, 7, "existing enforce keys survive the stamp")
+  assert.equal(st.turn_trajectory.session_db, fakeDb)
+  assert.equal(st.turn_trajectory.session_id, "ses_test")
+  assert.equal(st.turn_trajectory.message_id_start, "msg_123")
+  // no message id -> stamp still lands, without the boundary key
+  stampTurnTrajectory("ses_test2", undefined, tmp)
+  const st2 = JSON.parse(fs.readFileSync(path.join(chainDir, ".enforce.json"), "utf8"))
+  assert.equal(st2.turn_trajectory.session_id, "ses_test2")
+  assert.equal("message_id_start" in st2.turn_trajectory, false)
+  // kill switch
+  process.env["CT_OC_NO_TRAJECTORY"] = "1"
+  stampTurnTrajectory("ses_test3", "msg_9", tmp)
+  const st3 = JSON.parse(fs.readFileSync(path.join(chainDir, ".enforce.json"), "utf8"))
+  assert.equal(st3.turn_trajectory.session_id, "ses_test2", "CT_OC_NO_TRAJECTORY=1 disables the stamp")
+  delete process.env["CT_OC_NO_TRAJECTORY"]
+  delete process.env["CT_SESSION_DB"]
+  fs.rmSync(tmp, { recursive: true, force: true })
+}
+
 console.log("ALL PLUGIN TESTS PASSED")
 console.log("priming length:", FULL_PRIMING.length, "chars; reminder length:", REMINDER.length, "chars")

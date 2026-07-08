@@ -20,6 +20,9 @@
  *   CT_OC_DEBUG=1          append hook activity to the log file
  *   CT_OC_STATE_FILE       primed-session state path (default ~/.config/opencode/cypher-tempre-primed.json)
  *   CT_OC_LOG_FILE         debug log path (default ~/.config/opencode/cypher-tempre.log)
+ *   CT_SESSION_DB          opencode sqlite db stamped into turn_trajectory
+ *                          (default ~/.local/share/opencode/opencode.db)
+ *   CT_OC_NO_TRAJECTORY=1  disable the per-turn trajectory stamp
  */
 import fs from "node:fs"
 import os from "node:os"
@@ -97,6 +100,35 @@ function savePrimed(primed) {
 }
 
 /**
+ * Stamp the turn's trajectory pointer into the skill's enforcement state so
+ * the seal binds this turn's ring to its session slice (bind, don't copy —
+ * training.py resolves {session_db, session_id, message_id_start} into the
+ * turn's tool events at export). Fail-open: a missing db or unwritable chain
+ * dir never blocks the turn.
+ */
+function stampTurnTrajectory(sessionID, messageID, skillDir = SKILL_DIR) {
+  if (process.env["CT_OC_NO_TRAJECTORY"] === "1") return
+  try {
+    const db = process.env["CT_SESSION_DB"] ||
+      path.join(os.homedir(), ".local", "share", "opencode", "opencode.db")
+    if (!fs.existsSync(db)) return
+    const enforcePath = path.join(skillDir, "chain", ".enforce.json")
+    let st = {}
+    try { st = JSON.parse(fs.readFileSync(enforcePath, "utf8")) } catch {}
+    st.turn_trajectory = {
+      session_db: db,
+      session_id: sessionID,
+      ...(messageID ? { message_id_start: messageID } : {}),
+    }
+    fs.mkdirSync(path.dirname(enforcePath), { recursive: true })
+    fs.writeFileSync(enforcePath, JSON.stringify(st))
+    debug(`stampTurnTrajectory ${sessionID}: ${messageID || "no message id"}`)
+  } catch (e) {
+    debug(`stampTurnTrajectory failed (fail-open): ${e}`)
+  }
+}
+
+/**
  * Append `block` to the last non-synthetic text part of a user message.
  * Mutates in place. Returns true if a target part was found.
  */
@@ -162,6 +194,7 @@ export const CypherTempre = async () => {
     "chat.message": async (input, output) => {
       if (DISABLED) return
       const sessionID = input.sessionID
+      stampTurnTrajectory(sessionID, output?.message?.id ?? input?.messageID)
       const first = !primed.has(sessionID)
       const block = first ? FULL_PRIMING : REMINDER
       if (!appendToUserParts(output.parts, block)) {
@@ -190,4 +223,4 @@ export const CypherTempre = async () => {
 
 // The loader treats every module export as a plugin, so internals ride as
 // properties of the single exported function (for tests only).
-CypherTempre.internals = { FULL_PRIMING, REMINDER, appendToUserParts, truncateMessages }
+CypherTempre.internals = { FULL_PRIMING, REMINDER, appendToUserParts, truncateMessages, stampTurnTrajectory }

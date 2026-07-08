@@ -137,6 +137,15 @@ consistent; set the ceiling with headroom below your model's context limit.
    `python3 ~/.opencode/skills/cypher-tempre-self-model/timechain.py stat` —
    if the ring height grew, the agent is wearing the skill.
 
+## Trajectory stamping (training export)
+
+On every user turn the plugin stamps `turn_trajectory` —
+`{session_db, session_id, message_id_start}` — into the skill's
+`chain/.enforce.json`. The skill's seal binds the turn's ring to that pointer
+(`trajectory_ref`), and `training.py export --with-trajectory` in the skill
+repo resolves it into the turn's redacted tool-event slice straight from the
+OpenCode sqlite store. Fail-open: no db, no stamp, never a blocked turn.
+
 ## Knobs
 
 All configuration is via environment variables (read at plugin load):
@@ -150,6 +159,8 @@ All configuration is via environment variables (read at plugin load):
 | `CT_OC_DEBUG` | unset | `1` appends hook activity to the log file |
 | `CT_OC_STATE_FILE` | `~/.config/opencode/cypher-tempre-primed.json` | Where primed session IDs are stored (tests point this at a temp dir) |
 | `CT_OC_LOG_FILE` | `~/.config/opencode/cypher-tempre.log` | Debug log path |
+| `CT_SESSION_DB` | `~/.local/share/opencode/opencode.db` | Sqlite session store stamped into each turn's `turn_trajectory` (training-export binding) |
+| `CT_OC_NO_TRAJECTORY` | unset | `1` disables the per-turn trajectory stamp |
 
 Sizing `CT_OC_TOKEN_CEILING`: leave headroom below the model's context limit
 for the system prompt, output tokens, and estimator error (roughly ±30%). The
