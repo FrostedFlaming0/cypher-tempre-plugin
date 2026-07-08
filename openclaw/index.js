@@ -27,18 +27,15 @@
 import { createEngine } from "./lib/engine.js"
 import { buildReminder, ENGINE_ID, PLUGIN_ID, resolveConfig } from "./lib/priming.js"
 
-// definePluginEntry is a typing/normalization helper; fall back to identity
-// so this module stays importable (and testable) outside an OpenClaw host.
-let definePluginEntry = (definition) => definition
-try {
-  ;({ definePluginEntry } = await import("openclaw/plugin-sdk/plugin-entry"))
-} catch {}
-
 function pluginConfigFrom(ctx, event) {
   return ctx?.pluginConfig ?? event?.context?.pluginConfig ?? {}
 }
 
-export default definePluginEntry({
+// A plain definition object: the loader reads `register` off the default
+// export directly (definePluginEntry is only a typing/normalization helper,
+// and importing the SDK would break loading under transpilers without
+// top-level await — observed with the host's jiti load path).
+export default {
   id: PLUGIN_ID,
   name: "Cypher Tempre",
   description:
@@ -55,4 +52,4 @@ export default definePluginEntry({
       return { appendContext: buildReminder(cfg.skillDir) }
     })
   },
-})
+}
