@@ -1,4 +1,7 @@
 import assert from "node:assert"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { CypherTempre } from "./cypher-tempre.js"
 const { FULL_PRIMING, REMINDER, appendToUserParts, truncateMessages } = CypherTempre.internals
 
@@ -108,7 +111,11 @@ const turn = (userText, assistantCount = 1) => [user([text(userText)]), ...Array
 }
 
 // --- hooks end-to-end ------------------------------------------------------
-{
+// Hermetic: state goes to a temp file, never ~/.config/opencode. The plugin
+// resolves CT_OC_STATE_FILE lazily, so setting it after import still works.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-oc-test-"))
+process.env.CT_OC_STATE_FILE = path.join(tmpDir, "primed.json")
+try {
   process.env.CT_OC_DISABLE = ""
   const hooks = await CypherTempre()
   const sid = `ses_test_${Math.random().toString(36).slice(2)}`
@@ -141,6 +148,13 @@ const turn = (userText, assistantCount = 1) => [user([text(userText)]), ...Array
   await hooks["experimental.chat.messages.transform"]({}, outBig)
   assert.equal(outBig.messages.length, 1 + 15 * 2, "default keeps pin + 15 turns")
   assert.equal(outBig.messages[0].parts[0].text.split("\n")[0], "t1")
+
+  // the primed state landed in the temp file, not real config
+  const stored = JSON.parse(fs.readFileSync(process.env.CT_OC_STATE_FILE, "utf8"))
+  assert.ok(stored.includes(sid), "primed id persisted to CT_OC_STATE_FILE")
+} finally {
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+  delete process.env.CT_OC_STATE_FILE
 }
 
 console.log("ALL PLUGIN TESTS PASSED")

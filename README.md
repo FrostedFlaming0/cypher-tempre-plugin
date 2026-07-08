@@ -3,9 +3,9 @@
 An [OpenCode](https://opencode.ai) plugin that makes an agent **wear the
 [Cypher Tempre self-model](https://github.com/FrostedFlaming0/cypher-tempre-genesis)
 automatically on every session**, and keeps context **lean and free of compaction**
-by truncating to the first turn plus the most recent turns.
+by truncating to the first user message plus the most recent turns.
 
-Verified against OpenCode 1.17.13.
+Verified against OpenCode 1.17.14.
 
 ## Why
 
@@ -22,7 +22,8 @@ Two observations drive the design:
    need summarizing. They can simply fall out of context, and the agent recalls
    them verbatim from the chain when relevant. This plugin therefore disables
    nothing-survives-verbatim compaction entirely and instead shapes each request
-   to: **first turn (pinned) + last N turns (or fewer under a token ceiling)**.
+   to: **first user message (pinned) + last N turns (or fewer under a token
+   ceiling)**.
 
 ## How it works
 
@@ -43,7 +44,8 @@ Fires on every new user message, before the model call.
   decisions.
 
 The text is appended to the last non-synthetic text part of the message, so it
-is persisted with the message and survives in the pinned first turn. Primed
+is persisted with the message and survives in the pinned first user message.
+Primed
 session IDs are stored in `~/.config/opencode/cypher-tempre-primed.json`
 (capped at 500), so a server restart does not re-prime an existing session.
 Subagent sessions get primed automatically — child sessions are sessions.
@@ -82,9 +84,13 @@ consistent; set the ceiling with headroom below your model's context limit.
 2. **Install the plugin** (global plugins auto-load from the config dir):
 
    ```sh
-   mkdir -p ~/.config/opencode/plugin
-   cp cypher-tempre.js ~/.config/opencode/plugin/
+   mkdir -p ~/.config/opencode/plugins
+   cp cypher-tempre.js ~/.config/opencode/plugins/
    ```
+
+   `plugins/` (plural) is the directory the OpenCode docs document; as of
+   1.17.14 the loader scans both `plugin/` and `plugins/`, but prefer the
+   documented one.
 
 3. **Disable built-in compaction** so it never races the truncation, and
    (optionally) register the skill directory so it appears as a first-class
@@ -132,11 +138,13 @@ All configuration is via environment variables (read at plugin load):
 
 | Variable | Default | Effect |
 |---|---|---|
-| `CT_OC_KEEP_TURNS` | `15` | Max full turns kept in the per-request context (plus the pinned first turn) |
+| `CT_OC_KEEP_TURNS` | `15` | Max full turns kept in the per-request context (plus the pinned first user message) |
 | `CT_OC_TOKEN_CEILING` | `256000` | Approximate token budget for kept turns; truncation starts earlier than `KEEP_TURNS` when exceeded |
 | `CT_OC_SKILL_DIR` | `~/.opencode/skills/cypher-tempre-self-model` | Skill location referenced in the injected prompts |
 | `CT_OC_DISABLE` | unset | `1` disables both hooks (plugin stays loaded, does nothing) |
-| `CT_OC_DEBUG` | unset | `1` appends hook activity to `~/.config/opencode/cypher-tempre.log` |
+| `CT_OC_DEBUG` | unset | `1` appends hook activity to the log file |
+| `CT_OC_STATE_FILE` | `~/.config/opencode/cypher-tempre-primed.json` | Where primed session IDs are stored (tests point this at a temp dir) |
+| `CT_OC_LOG_FILE` | `~/.config/opencode/cypher-tempre.log` | Debug log path |
 
 Sizing `CT_OC_TOKEN_CEILING`: leave headroom below the model's context limit
 for the system prompt, output tokens, and estimator error (roughly ±30%). The
@@ -145,7 +153,7 @@ for the system prompt, output tokens, and estimator error (roughly ±30%). The
 
 Truncation order when the ceiling bites: turns drop **oldest-first** — the
 15th-most-recent turn goes first, then the 14th, and so on toward the present.
-Two turns are exempt: the **first turn of the session** (pinned — never
+Two exemptions: the **first user message of the session** (pinned — never
 dropped; it rides outside the token budget entirely) and the **most recent
 turn** (always kept, even if it alone exceeds the ceiling). Kept turns are
 always contiguous — no holes.
@@ -155,6 +163,9 @@ always contiguous — no holes.
 ```sh
 node test.mjs
 ```
+
+Tests are hermetic: the end-to-end block points `CT_OC_STATE_FILE` at a temp
+dir, so real OpenCode state is never touched.
 
 Covers: append targeting (last non-synthetic text part), first-vs-subsequent
 priming, primed-state persistence across plugin reloads, turn-count truncation,
@@ -181,7 +192,7 @@ loader contract (see below).
 ## Uninstall
 
 ```sh
-rm ~/.config/opencode/plugin/cypher-tempre.js \
+rm ~/.config/opencode/plugins/cypher-tempre.js \
    ~/.config/opencode/cypher-tempre-primed.json \
    ~/.config/opencode/cypher-tempre.log
 ```
