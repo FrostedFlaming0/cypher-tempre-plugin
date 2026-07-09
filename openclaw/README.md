@@ -57,6 +57,23 @@ Environment overrides: `CT_OCLAW_KEEP_TURNS`, `CT_OCLAW_TOKEN_CEILING`,
 `CT_OCLAW_EVICTION_BATCH`, `CT_OCLAW_SKILL_DIR`, and `CT_OCLAW_DISABLE=1`
 (turns off primer + reminder; the engine still windows).
 
+### If you pin `plugins.allow`
+
+OpenClaw's gateway warning suggests pinning trust via `plugins.allow`. That
+list is an **exclusive allow-list**: once it is non-empty, any discovered
+(non-bundled) plugin missing from it is **silently skipped at load — including
+this one**. If you pin it, include every Cypher Tempre plugin id you use, plus
+any other non-bundled plugins:
+
+```json5
+{ plugins: { allow: ["cypher-tempre", "cypher-tempre-enforcement"] } }
+```
+
+Leaving `plugins.allow` empty is also fine — the warning is informational. The
+failure mode of an incomplete list is silent: the agent simply stops wearing
+the skill (no primer, no per-turn reminder, no pinned window, no seal
+enforcement) with no error.
+
 ## Semantics
 
 - Turns group at user-message boundaries, so `tool_use`/`toolResult` pairs
