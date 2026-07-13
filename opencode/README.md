@@ -32,7 +32,7 @@ Two observations drive the design:
 
 ## How it works
 
-The plugin registers two server hooks:
+The plugin registers three server hooks:
 
 ### `chat.message` — prompt injection, user-voice
 
@@ -72,6 +72,35 @@ Fires immediately before messages are converted for the model, on every step.
 
 Token counts are estimated as `JSON length / 4` per message — crude but
 consistent; set the ceiling with headroom below your model's context limit.
+
+### `event` — the active nudge (the missing Stop hook, one layer up)
+
+OpenCode has no synchronous turn-end gate: by the time `session.status: idle`
+fires, the turn has already ended, so an unsealed turn used to pass silently —
+priming was the *sole* adherence mechanism. The active nudge converts the
+post-hoc notification into a bounded re-prompt using the skill's own
+enforcement brain:
+
+1. `chat.message` (real user messages only) runs `enforce.py mark` — the same
+   turn-head baseline the Claude Code and Codex hooks record — then stamps the
+   trajectory pointer.
+2. On `session.status: idle` for a session this plugin primed, the `event` hook
+   runs `enforce.py stop-check`.
+3. An allow verdict (ring sealed, dormant chain, or budget exhausted) ends the
+   turn quietly. A `{"decision":"block"}` verdict is sent back into the session
+   as **one follow-up user message** via `client.session.promptAsync` — the
+   sentinel line `[Cypher Tempre nudge — the previous turn has not sealed]`
+   plus the block reason (which names the exact `recall.py turn` remedy).
+4. The nudge message is recognized when it echoes back through `chat.message`
+   and passes through untouched: no re-mark (the turn baseline and enforce.py
+   nudge budget belong to the still-open turn), no reminder append, no
+   trajectory restamp.
+
+Bounded twice — `enforce.py`'s own nudge budget (`CT_ENFORCE_MAX_NUDGES`, with
+seal-debt accounting when exhausted) and the plugin-side `CT_OC_MAX_NUDGES`
+(default 2) — and fail-open everywhere: a missing skill dir, dead python, or
+timeout never blocks the session. Each nudge costs one model call; adherence
+telemetry (`telemetry.py adherence`) records the outcome either way.
 
 ## Install
 
@@ -161,6 +190,10 @@ All configuration is via environment variables (read at plugin load):
 | `CT_OC_LOG_FILE` | `~/.config/opencode/cypher-tempre.log` | Debug log path |
 | `CT_SESSION_DB` | `~/.local/share/opencode/opencode.db` | Sqlite session store stamped into each turn's `turn_trajectory` (training-export binding) |
 | `CT_OC_NO_TRAJECTORY` | unset | `1` disables the per-turn trajectory stamp |
+| `CT_OC_NUDGE` | unset | `0` disables the active nudge (idle-time stop-check re-prompt) |
+| `CT_OC_MAX_NUDGES` | `2` | Plugin-side nudge cap per turn; `enforce.py`'s own `CT_ENFORCE_MAX_NUDGES` budget also applies |
+| `CT_OC_PYTHON` | `python3` | Python executable used to run `enforce.py` |
+| `CT_OC_NUDGE_TIMEOUT_MS` | `5000` | Per-call timeout for `enforce.py` mark/stop-check |
 
 Sizing `CT_OC_TOKEN_CEILING`: leave headroom below the model's context limit
 for the system prompt, output tokens, and estimator error (roughly ±30%). The

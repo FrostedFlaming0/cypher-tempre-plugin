@@ -11,6 +11,14 @@
  *    or fewer if the token ceiling is hit. Session storage is untouched —
  *    only the per-request view is shaped. Pair with `"compaction": {"auto": false}`
  *    in opencode.json so the built-in summarizer never races this.
+ * 3. ACTIVE NUDGE — the missing Stop-hook, one layer up. OpenCode events are
+ *    post-hoc (by `session.status: idle` the turn has already ended), so the
+ *    plugin converts the notification into a bounded re-prompt: `chat.message`
+ *    runs `enforce.py mark` (turn-head baseline), and on idle the `event` hook
+ *    runs `enforce.py stop-check`; a `{"decision":"block"}` verdict is sent
+ *    back into the session as one follow-up user message via the client SDK.
+ *    Bounded twice (enforce.py's nudge budget + CT_OC_MAX_NUDGES), fail-open
+ *    everywhere: a missing skill, dead python, or dormant chain never blocks.
  *
  * Knobs (environment):
  *   CT_OC_DISABLE=1        disable both hooks entirely
@@ -23,10 +31,16 @@
  *   CT_SESSION_DB          opencode sqlite db stamped into turn_trajectory
  *                          (default ~/.local/share/opencode/opencode.db)
  *   CT_OC_NO_TRAJECTORY=1  disable the per-turn trajectory stamp
+ *   CT_OC_NUDGE=0          disable the active nudge (idle-time stop-check re-prompt)
+ *   CT_OC_MAX_NUDGES       plugin-side nudge cap per turn (default 2; enforce.py's
+ *                          own CT_ENFORCE_MAX_NUDGES budget also applies)
+ *   CT_OC_PYTHON           python executable for enforce.py (default python3)
+ *   CT_OC_NUDGE_TIMEOUT_MS per-call timeout for enforce.py (default 5000)
  */
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { spawn } from "node:child_process"
 
 const SKILL_DIR = process.env["CT_OC_SKILL_DIR"] || path.join(os.homedir(), ".opencode", "skills", "cypher-tempre-self-model")
 const KEEP_TURNS = intEnv("CT_OC_KEEP_TURNS", 15)
@@ -81,6 +95,100 @@ Bulk work is a different mode: when a task means ingesting or auditing a corpus 
 If the co-evolver has paused the self-model (python3 ${SKILL_DIR}/dormancy.py status), skip the loop and answer directly until resumed.`
 
 const REMINDER = `[Cypher Tempre] ACTIVE — run the loop and seal before ending: python3 ${SKILL_DIR}/recall.py turn "<finding>" --input "<request>". Route task-shaped requests first: python3 ${SKILL_DIR}/router.py route "<task>". Fork per the doctrine if a genuine either/or decision exists. Context truncates to the first user message + recent turns; the chain is memory — recall, don't assume. (Skip only if dormancy.py status says dormant.)`
+
+// Marks a plugin-sent nudge message so chat.message never re-marks the turn,
+// re-appends a reminder, or restamps the trajectory for it: the nudge is a
+// CONTINUATION of the open turn, not a new one.
+const NUDGE_SENTINEL = "[Cypher Tempre nudge — the previous turn has not sealed]"
+
+function nudgeSkillDir() {
+  // Re-read env lazily (tests point this at a temp dir after import); falls
+  // back to the module-load SKILL_DIR used by the priming text.
+  return process.env["CT_OC_SKILL_DIR"] || SKILL_DIR
+}
+
+/**
+ * Run `enforce.py <cmd>` with an empty hook payload on stdin.
+ * Resolves to: null  = could not run (missing script / dead python / timeout),
+ *              ""    = ran, no stdout (the ALLOW verdict for stop-check),
+ *              text  = raw stdout (stop-check's block JSON rides here).
+ * Fail-open by construction — no rejection path exists.
+ */
+function runEnforce(cmd) {
+  return new Promise((resolve) => {
+    const script = path.join(nudgeSkillDir(), "enforce.py")
+    if (!fs.existsSync(script)) return resolve(null)
+    const py = process.env["CT_OC_PYTHON"] || "python3"
+    const timeoutMs = intEnv("CT_OC_NUDGE_TIMEOUT_MS", 5000)
+    let out = ""
+    let done = false
+    const finish = (v) => {
+      if (!done) {
+        done = true
+        resolve(v)
+      }
+    }
+    try {
+      const child = spawn(py, [script, cmd], { stdio: ["pipe", "pipe", "ignore"] })
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL")
+        } catch {}
+        finish(null)
+      }, timeoutMs)
+      child.stdout.on("data", (d) => {
+        out += d
+      })
+      child.on("error", () => {
+        clearTimeout(timer)
+        finish(null)
+      })
+      child.on("close", () => {
+        clearTimeout(timer)
+        finish(out.trim())
+      })
+      child.stdin.on("error", () => {})
+      child.stdin.write("{}")
+      child.stdin.end()
+    } catch {
+      finish(null)
+    }
+  })
+}
+
+/** Parse stop-check stdout into a block reason, or null when the turn may end. */
+function blockReason(stdout) {
+  if (!stdout) return null
+  try {
+    const verdict = JSON.parse(stdout)
+    if (verdict && verdict.decision === "block" && typeof verdict.reason === "string") return verdict.reason
+  } catch {}
+  return null
+}
+
+/** True when this user message is one of our own nudges echoing back. */
+function isNudgeMessage(parts) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]
+    if (part && part.type === "text" && !part.synthetic) return part.text.startsWith(NUDGE_SENTINEL)
+  }
+  return false
+}
+
+const MAX_TRACKED_SESSIONS = 500
+
+function trackSession(sessions, sessionID) {
+  let sess = sessions.get(sessionID)
+  if (!sess) {
+    sess = { awaitingIdle: false, nudges: 0 }
+    sessions.set(sessionID, sess)
+    if (sessions.size > MAX_TRACKED_SESSIONS) {
+      const oldest = sessions.keys().next().value
+      sessions.delete(oldest)
+    }
+  }
+  return sess
+}
 
 function loadPrimed() {
   try {
@@ -187,13 +295,32 @@ function truncateMessages(messages, opts = {}) {
   return [...messages.slice(0, firstUser + 1), ...messages.slice(tailStart)]
 }
 
-export const CypherTempre = async () => {
+export const CypherTempre = async (input = {}) => {
   const primed = loadPrimed()
+  const client = input.client
+  // sessionID -> { awaitingIdle, nudges }; turn-scoped nudge accounting for
+  // every session this plugin has actually primed (parents and subagents alike).
+  const sessions = new Map()
   debug(`plugin loaded (disabled=${DISABLED}, keepTurns=${KEEP_TURNS}, ceiling=${TOKEN_CEILING})`)
   return {
     "chat.message": async (input, output) => {
       if (DISABLED) return
       const sessionID = input.sessionID
+      const sess = trackSession(sessions, sessionID)
+      if (isNudgeMessage(output.parts)) {
+        // Our own nudge echoing back: the turn baseline, nudge budget, and
+        // trajectory slice all belong to the still-open turn — touch nothing,
+        // append nothing (the nudge text IS the reminder). Just re-arm the
+        // idle check so the re-prompted pass gets re-audited.
+        sess.awaitingIdle = true
+        debug(`chat.message ${sessionID}: nudge message, pass-through`)
+        return
+      }
+      sess.nudges = 0
+      sess.awaitingIdle = true
+      // Turn-head baseline first (mark clears any stale turn_trajectory),
+      // then stamp this turn's trajectory pointer over it.
+      await runEnforce("mark")
       stampTurnTrajectory(sessionID, output?.message?.id ?? input?.messageID)
       const first = !primed.has(sessionID)
       const block = first ? FULL_PRIMING : REMINDER
@@ -206,6 +333,37 @@ export const CypherTempre = async () => {
         savePrimed(primed)
       }
       debug(`chat.message ${sessionID}: appended ${first ? "FULL_PRIMING" : "REMINDER"}`)
+    },
+    event: async ({ event }) => {
+      if (DISABLED || process.env["CT_OC_NUDGE"] === "0") return
+      if (!event || event.type !== "session.status") return
+      const data = event.data ?? event.properties ?? {}
+      if (data.status?.type !== "idle") return
+      const sessionID = data.sessionID
+      const sess = sessions.get(sessionID)
+      if (!sess || !sess.awaitingIdle) return // not a session we primed, or already checked
+      sess.awaitingIdle = false
+      const maxNudges = intEnv("CT_OC_MAX_NUDGES", 2)
+      if (sess.nudges >= maxNudges) {
+        debug(`idle ${sessionID}: plugin nudge cap reached (${sess.nudges})`)
+        return
+      }
+      const reason = blockReason(await runEnforce("stop-check"))
+      if (!reason) return // sealed, dormant, unenforceable, or enforce.py budget exhausted
+      sess.nudges++
+      const text = `${NUDGE_SENTINEL}\n${reason}`
+      try {
+        const session = client?.session
+        const send = session?.promptAsync?.bind(session) ?? session?.prompt?.bind(session)
+        if (!send) {
+          debug(`idle ${sessionID}: no client SDK available, cannot nudge`)
+          return
+        }
+        await send({ path: { id: sessionID }, body: { parts: [{ type: "text", text }] } })
+        debug(`idle ${sessionID}: sent nudge ${sess.nudges}/${maxNudges}`)
+      } catch (e) {
+        debug(`idle ${sessionID}: nudge send failed (fail-open): ${e}`)
+      }
     },
     "experimental.chat.messages.transform": async (_input, output) => {
       if (DISABLED) return
@@ -223,4 +381,14 @@ export const CypherTempre = async () => {
 
 // The loader treats every module export as a plugin, so internals ride as
 // properties of the single exported function (for tests only).
-CypherTempre.internals = { FULL_PRIMING, REMINDER, appendToUserParts, truncateMessages, stampTurnTrajectory }
+CypherTempre.internals = {
+  FULL_PRIMING,
+  REMINDER,
+  NUDGE_SENTINEL,
+  appendToUserParts,
+  truncateMessages,
+  stampTurnTrajectory,
+  runEnforce,
+  blockReason,
+  isNudgeMessage,
+}

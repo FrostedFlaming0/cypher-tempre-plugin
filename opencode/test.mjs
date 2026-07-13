@@ -115,6 +115,9 @@ const turn = (userText, assistantCount = 1) => [user([text(userText)]), ...Array
 // resolves CT_OC_STATE_FILE lazily, so setting it after import still works.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-oc-test-"))
 process.env.CT_OC_STATE_FILE = path.join(tmpDir, "primed.json")
+// Point the enforce runner at the empty temp dir: no enforce.py there, so the
+// mark call in chat.message is a no-op — a real install is never touched.
+process.env.CT_OC_SKILL_DIR = tmpDir
 try {
   process.env.CT_OC_DISABLE = ""
   const hooks = await CypherTempre()
@@ -155,6 +158,113 @@ try {
 } finally {
   fs.rmSync(tmpDir, { recursive: true, force: true })
   delete process.env.CT_OC_STATE_FILE
+  delete process.env.CT_OC_SKILL_DIR
+}
+
+// --- active nudge ----------------------------------------------------------
+// Fake skill dir: enforce.py answers stop-check from mode.txt (block/allow)
+// and appends every command it runs to calls.log — full control, no chain.
+{
+  const { NUDGE_SENTINEL, blockReason, isNudgeMessage } = CypherTempre.internals
+  const nudgeTmp = fs.mkdtempSync(path.join(os.tmpdir(), "ct-oc-nudge-"))
+  const modeFile = path.join(nudgeTmp, "mode.txt")
+  const callsLog = path.join(nudgeTmp, "calls.log")
+  fs.writeFileSync(
+    path.join(nudgeTmp, "enforce.py"),
+    [
+      "import json, pathlib, sys",
+      "here = pathlib.Path(__file__).parent",
+      "cmd = sys.argv[1] if len(sys.argv) > 1 else '?'",
+      "with open(here / 'calls.log', 'a') as f: f.write(cmd + '\\n')",
+      "if cmd == 'stop-check' and (here / 'mode.txt').read_text().strip() == 'block':",
+      "    print(json.dumps({'decision': 'block', 'reason': 'seal the turn: run recall.py turn'}))",
+    ].join("\n"),
+  )
+  const callsFor = (cmd) =>
+    fs.existsSync(callsLog) ? fs.readFileSync(callsLog, "utf8").split("\n").filter((l) => l === cmd).length : 0
+  process.env.CT_OC_SKILL_DIR = nudgeTmp
+  process.env.CT_OC_STATE_FILE = path.join(nudgeTmp, "primed.json")
+  process.env.CT_OC_NO_TRAJECTORY = "1"
+  try {
+    // unit: verdict parsing + sentinel detection
+    assert.equal(blockReason('{"decision":"block","reason":"r"}'), "r")
+    assert.equal(blockReason(""), null)
+    assert.equal(blockReason(null), null)
+    assert.equal(blockReason("not json"), null)
+    assert.equal(isNudgeMessage([text(`${NUDGE_SENTINEL}\nseal it`)]), true)
+    assert.equal(isNudgeMessage([text("ordinary request")]), false)
+
+    const sent = []
+    const fakeClient = {
+      session: {
+        promptAsync: async (opts) => {
+          sent.push(opts)
+          return {}
+        },
+      },
+    }
+    const hooks = await CypherTempre({ client: fakeClient })
+    const sid = "ses_nudge_test"
+    const idle = { type: "session.status", data: { sessionID: sid, status: { type: "idle" } } }
+
+    // unsealed turn -> exactly one nudge per idle, carrying sentinel + reason
+    fs.writeFileSync(modeFile, "block")
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("do work")] })
+    assert.equal(callsFor("mark"), 1, "real user message runs enforce.py mark")
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 1, "block verdict sends one nudge")
+    assert.equal(sent[0].path.id, sid)
+    assert.ok(sent[0].body.parts[0].text.startsWith(NUDGE_SENTINEL))
+    assert.ok(sent[0].body.parts[0].text.includes("seal the turn"))
+
+    // duplicate idle without a new turn -> no second nudge (debounced)
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 1, "idle is debounced until a new message arrives")
+
+    // the nudge echoes back as a user message -> pass-through, no mark, no append
+    const echo = { message: {}, parts: [text(`${NUDGE_SENTINEL}\nseal the turn: run recall.py turn`)] }
+    await hooks["chat.message"]({ sessionID: sid }, echo)
+    assert.equal(callsFor("mark"), 1, "nudge message must not re-mark the turn")
+    assert.ok(!echo.parts[0].text.includes("[Cypher Tempre] ACTIVE"), "nudge message gets no reminder")
+
+    // still unsealed -> second nudge allowed (cap is 2)...
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 2, "second nudge within the cap")
+
+    // ...but a third is refused by the plugin-side cap
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text(`${NUDGE_SENTINEL}\nagain`)] })
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 2, "plugin nudge cap (default 2) holds")
+
+    // a real user message resets the budget; a sealed turn (allow) never nudges
+    fs.writeFileSync(modeFile, "allow")
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("next task")] })
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 2, "allow verdict sends no nudge")
+
+    // untracked session -> ignored
+    await hooks.event({ event: { type: "session.status", data: { sessionID: "ses_other", status: { type: "idle" } } } })
+    assert.equal(sent.length, 2, "unprimed sessions are never nudged")
+
+    // kill switch
+    fs.writeFileSync(modeFile, "block")
+    process.env.CT_OC_NUDGE = "0"
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("more work")] })
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 2, "CT_OC_NUDGE=0 disables the active nudge")
+    delete process.env.CT_OC_NUDGE
+
+    // properties-envelope compatibility (older event bus shape)
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("legacy envelope")] })
+    await hooks.event({ event: { type: "session.status", properties: { sessionID: sid, status: { type: "idle" } } } })
+    assert.equal(sent.length, 3, "properties envelope is handled")
+  } finally {
+    fs.rmSync(nudgeTmp, { recursive: true, force: true })
+    delete process.env.CT_OC_SKILL_DIR
+    delete process.env.CT_OC_STATE_FILE
+    delete process.env.CT_OC_NO_TRAJECTORY
+    delete process.env.CT_OC_NUDGE
+  }
 }
 
 // --- stampTurnTrajectory ---------------------------------------------------
