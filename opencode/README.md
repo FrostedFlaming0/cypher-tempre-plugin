@@ -107,6 +107,14 @@ seal-debt accounting when exhausted) and the plugin-side `CT_OC_MAX_NUDGES`
 timeout never blocks the session. Each nudge costs one model call; adherence
 telemetry (`telemetry.py adherence`) records the outcome either way.
 
+**One active session per chain root.** The skill is designed for a single
+active session on a chain at a time: `mark`/`stop-check` state
+(`chain/.enforce.json`) is per-root, not per-session, so concurrent sessions
+on one root can satisfy each other's stop-check and cross-bind trajectory
+pointers (corrupting training provenance silently). OpenCode **subagent child
+sessions count** — the plugin primes and marks them like any session. Run one
+session at a time per chain; give concurrent agents their own chain roots.
+
 ## Install
 
 1. **Install the Cypher Tempre skill** for the OpenCode agent (its own identity,
@@ -229,6 +237,10 @@ loader contract (see below).
 
 ## Gotchas
 
+- **Single active session per chain root.** Enforcement state is per-root
+  (see the active-nudge section): concurrent sessions — including subagent
+  child sessions — on one chain can false-satisfy each other's stop-check and
+  cross-bind trajectory stamps. One session at a time per chain.
 - **The loader requires every module export to be a plugin function.** This
   file exports exactly one function (`CypherTempre`); test internals ride as
   properties on it. Adding a plain `export const` of a string or object will
