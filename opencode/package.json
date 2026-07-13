@@ -1,6 +1,6 @@
 {
   "name": "cypher-tempre-opencode-plugin",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "OpenCode plugin that auto-wears the Cypher Tempre self-model via user-voice prompt injection, keeps context lean with turn-based truncation instead of compaction, and actively nudges unsealed turns via idle-time stop-check",
   "type": "module",
   "main": "cypher-tempre.js",

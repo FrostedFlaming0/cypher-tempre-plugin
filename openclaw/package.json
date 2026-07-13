@@ -1,6 +1,6 @@
 {
   "name": "openclaw-cypher-tempre",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cypher Tempre self-model integration for OpenClaw: pinned-window context engine plus primer/reminder auto-append.",
   "type": "module",
   "license": "MIT",
