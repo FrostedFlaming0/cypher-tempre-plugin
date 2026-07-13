@@ -66,7 +66,7 @@ Route before you reason. Start each task with python3 ${skillDir}/router.py rout
 Supply your own judgment at the seams — what the machinery cannot do for you:
 - Score your seals yourself (--coherence/--relevance/--novelty/--consistency/--depth/--covenant, 0-255); the lexical proxies are fallbacks, not judges.
 - Declare your evidence with --used-rings on every grounded claim, and register --at-risk claims when the gate forces uncertainty.
-- Resolve AUTHOR-OP obligations honestly: author the op (cambium.py autoexec) when your turn genuinely performed a computation code could own; otherwise --skip-op-reason with the specific reason — never author a hollow op to clear the nudge.
+- Resolve AUTHOR-OP obligations honestly: author the op (cambium.py autoexec) when your turn genuinely performed a computation code could own — then reseal ONCE grounded on its computed result (--used-rings the autoexec ring). Otherwise skip: pre-emptively with --skip-op-reason on the seal, or post-hoc with enforce.py resolve-op "<reason>" (seals a small operator ring — never re-run the turn for a skip, and never author a hollow op to clear the nudge).
 - Announce faculties your turns grow, by name and function.
 
 Fork doctrine — before reasoning through any turn, ask one gating question: is there a genuine either/or decision here? If no decision exists (execution, recall, reporting — most turns), run the plain loop. If one exists, probe with python3 ${skillDir}/chronosynaptic.py think "<the question>" --context "<situation>" (no --seal); escalate to a full worksheet fork-and-collapse (collapse-notes --seal) only when stakes are high or the probe disagrees with your own read. After tier-3 escalations, run python3 ${skillDir}/dream.py run to harvest the dissent.
