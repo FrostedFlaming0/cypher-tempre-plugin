@@ -90,11 +90,16 @@ enforcement brain:
    turn quietly. A `{"decision":"block"}` verdict is sent back into the session
    as **one follow-up user message** via `client.session.promptAsync` — the
    sentinel line `[Cypher Tempre nudge — the previous turn has not sealed]`
-   plus the block reason (which names the exact `recall.py turn` remedy).
-4. The nudge message is recognized when it echoes back through `chat.message`
-   and passes through untouched: no re-mark (the turn baseline and enforce.py
-   nudge budget belong to the still-open turn), no reminder append, no
-   trajectory restamp.
+   with a **per-send random nonce**, plus the block reason (which names the
+   exact `recall.py turn` remedy).
+4. The nudge is recognized when it echoes back through `chat.message` **only by
+   exact match against the outstanding nonce-bearing text for that session** —
+   the public sentinel alone proves nothing. A genuine echo passes through
+   untouched: no re-mark (the turn baseline and enforce.py nudge budget belong
+   to the still-open turn), no reminder append, no trajectory restamp. A
+   message that merely copies the sentinel (no outstanding nudge, or any
+   textual mismatch) is ordinary user input: marked, reminded, and stamped
+   like everything else.
 
 Bounded twice — `enforce.py`'s own nudge budget (`CT_ENFORCE_MAX_NUDGES`, with
 seal-debt accounting when exhausted) and the plugin-side `CT_OC_MAX_NUDGES`

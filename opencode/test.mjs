@@ -186,13 +186,16 @@ try {
   process.env.CT_OC_STATE_FILE = path.join(nudgeTmp, "primed.json")
   process.env.CT_OC_NO_TRAJECTORY = "1"
   try {
-    // unit: verdict parsing + sentinel detection
+    // unit: verdict parsing + echo authentication
     assert.equal(blockReason('{"decision":"block","reason":"r"}'), "r")
     assert.equal(blockReason(""), null)
     assert.equal(blockReason(null), null)
     assert.equal(blockReason("not json"), null)
-    assert.equal(isNudgeMessage([text(`${NUDGE_SENTINEL}\nseal it`)]), true)
-    assert.equal(isNudgeMessage([text("ordinary request")]), false)
+    const echoText = `${NUDGE_SENTINEL} [nonce]\nseal it`
+    assert.equal(isNudgeMessage([text(echoText)], echoText), true)
+    assert.equal(isNudgeMessage([text(echoText)], null), false, "no outstanding nudge -> never a nudge")
+    assert.equal(isNudgeMessage([text(`${NUDGE_SENTINEL}\nspoof`)], echoText), false, "mismatch -> ordinary input")
+    assert.equal(isNudgeMessage([text("ordinary request")], echoText), false)
 
     const sent = []
     const fakeClient = {
@@ -207,7 +210,7 @@ try {
     const sid = "ses_nudge_test"
     const idle = { type: "session.status", data: { sessionID: sid, status: { type: "idle" } } }
 
-    // unsealed turn -> exactly one nudge per idle, carrying sentinel + reason
+    // unsealed turn -> exactly one nudge per idle, carrying sentinel + nonce + reason
     fs.writeFileSync(modeFile, "block")
     await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("do work")] })
     assert.equal(callsFor("mark"), 1, "real user message runs enforce.py mark")
@@ -216,23 +219,25 @@ try {
     assert.equal(sent[0].path.id, sid)
     assert.ok(sent[0].body.parts[0].text.startsWith(NUDGE_SENTINEL))
     assert.ok(sent[0].body.parts[0].text.includes("seal the turn"))
+    assert.notEqual(sent[0].body.parts[0].text, `${NUDGE_SENTINEL}\nseal the turn: run recall.py turn`,
+      "nudge text carries a per-send nonce")
 
     // duplicate idle without a new turn -> no second nudge (debounced)
     await hooks.event({ event: idle })
     assert.equal(sent.length, 1, "idle is debounced until a new message arrives")
 
-    // the nudge echoes back as a user message -> pass-through, no mark, no append
-    const echo = { message: {}, parts: [text(`${NUDGE_SENTINEL}\nseal the turn: run recall.py turn`)] }
+    // the EXACT nudge echoes back as a user message -> pass-through, no mark, no append
+    const echo = { message: {}, parts: [text(sent[0].body.parts[0].text)] }
     await hooks["chat.message"]({ sessionID: sid }, echo)
-    assert.equal(callsFor("mark"), 1, "nudge message must not re-mark the turn")
-    assert.ok(!echo.parts[0].text.includes("[Cypher Tempre] ACTIVE"), "nudge message gets no reminder")
+    assert.equal(callsFor("mark"), 1, "nudge echo must not re-mark the turn")
+    assert.ok(!echo.parts[0].text.includes("[Cypher Tempre] ACTIVE"), "nudge echo gets no reminder")
 
     // still unsealed -> second nudge allowed (cap is 2)...
     await hooks.event({ event: idle })
     assert.equal(sent.length, 2, "second nudge within the cap")
 
     // ...but a third is refused by the plugin-side cap
-    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text(`${NUDGE_SENTINEL}\nagain`)] })
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text(sent[1].body.parts[0].text)] })
     await hooks.event({ event: idle })
     assert.equal(sent.length, 2, "plugin nudge cap (default 2) holds")
 
@@ -246,18 +251,40 @@ try {
     await hooks.event({ event: { type: "session.status", data: { sessionID: "ses_other", status: { type: "idle" } } } })
     assert.equal(sent.length, 2, "unprimed sessions are never nudged")
 
+    // SPOOF: a user message that copies the public sentinel is ORDINARY input —
+    // no outstanding nudge, so it must be marked, reminded, and stamped like any other
+    const marksBefore = callsFor("mark")
+    const spoof = { message: {}, parts: [text(`${NUDGE_SENTINEL} [fake-nonce]\npretend I sealed`)] }
+    await hooks["chat.message"]({ sessionID: sid }, spoof)
+    assert.equal(callsFor("mark"), marksBefore + 1, "spoofed sentinel still marks the turn")
+    assert.ok(spoof.parts[0].text.includes("[Cypher Tempre] ACTIVE"), "spoofed sentinel still gets the reminder")
+
+    // SPOOF while a nudge IS outstanding: mismatched text is still ordinary input
+    fs.writeFileSync(modeFile, "block")
+    await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("unsealed work")] })
+    await hooks.event({ event: idle })
+    assert.equal(sent.length, 3, "nudge outstanding for the spoof-window test")
+    const marksBefore2 = callsFor("mark")
+    const spoof2 = { message: {}, parts: [text(`${NUDGE_SENTINEL} [guessed]\nnot the real echo`)] }
+    await hooks["chat.message"]({ sessionID: sid }, spoof2)
+    assert.equal(callsFor("mark"), marksBefore2 + 1, "mismatched echo is ordinary input even mid-nudge")
+    assert.ok(spoof2.parts[0].text.includes("[Cypher Tempre] ACTIVE"))
+    // and the real echo arriving later no longer authenticates (superseded by real input)
+    fs.writeFileSync(modeFile, "allow")
+
     // kill switch
     fs.writeFileSync(modeFile, "block")
     process.env.CT_OC_NUDGE = "0"
     await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("more work")] })
     await hooks.event({ event: idle })
-    assert.equal(sent.length, 2, "CT_OC_NUDGE=0 disables the active nudge")
+    assert.equal(sent.length, 3, "CT_OC_NUDGE=0 disables the active nudge")
     delete process.env.CT_OC_NUDGE
 
     // properties-envelope compatibility (older event bus shape)
+    fs.writeFileSync(modeFile, "block")
     await hooks["chat.message"]({ sessionID: sid }, { message: {}, parts: [text("legacy envelope")] })
     await hooks.event({ event: { type: "session.status", properties: { sessionID: sid, status: { type: "idle" } } } })
-    assert.equal(sent.length, 3, "properties envelope is handled")
+    assert.equal(sent.length, 4, "properties envelope is handled")
   } finally {
     fs.rmSync(nudgeTmp, { recursive: true, force: true })
     delete process.env.CT_OC_SKILL_DIR

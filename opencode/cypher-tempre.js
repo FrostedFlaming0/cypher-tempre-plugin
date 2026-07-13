@@ -41,6 +41,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 
 const SKILL_DIR = process.env["CT_OC_SKILL_DIR"] || path.join(os.homedir(), ".opencode", "skills", "cypher-tempre-self-model")
 const KEEP_TURNS = intEnv("CT_OC_KEEP_TURNS", 15)
@@ -98,7 +99,11 @@ const REMINDER = `[Cypher Tempre] ACTIVE — run the loop and seal before ending
 
 // Marks a plugin-sent nudge message so chat.message never re-marks the turn,
 // re-appends a reminder, or restamps the trajectory for it: the nudge is a
-// CONTINUATION of the open turn, not a new one.
+// CONTINUATION of the open turn, not a new one. The sentinel is public text,
+// so it is NEVER trusted alone: each nudge carries a per-send random nonce and
+// the echo must exactly match the outstanding expected text for that session
+// (sess.expectedEcho). A crafted message that merely starts with the sentinel
+// is treated as an ordinary user message — marked, reminded, stamped.
 const NUDGE_SENTINEL = "[Cypher Tempre nudge — the previous turn has not sealed]"
 
 function nudgeSkillDir() {
@@ -166,13 +171,24 @@ function blockReason(stdout) {
   return null
 }
 
-/** True when this user message is one of our own nudges echoing back. */
-function isNudgeMessage(parts) {
+/** The message's last non-synthetic text, or null. */
+function lastUserText(parts) {
   for (let i = parts.length - 1; i >= 0; i--) {
     const part = parts[i]
-    if (part && part.type === "text" && !part.synthetic) return part.text.startsWith(NUDGE_SENTINEL)
+    if (part && part.type === "text" && !part.synthetic) return part.text
   }
-  return false
+  return null
+}
+
+/**
+ * True only when this message is the exact echo of the nudge this session is
+ * still owed. The public sentinel alone proves nothing — without an
+ * outstanding expectedEcho, or with any textual mismatch, the message is
+ * ordinary user input.
+ */
+function isNudgeMessage(parts, expectedEcho) {
+  if (!expectedEcho) return false
+  return lastUserText(parts) === expectedEcho
 }
 
 const MAX_TRACKED_SESSIONS = 500
@@ -180,7 +196,7 @@ const MAX_TRACKED_SESSIONS = 500
 function trackSession(sessions, sessionID) {
   let sess = sessions.get(sessionID)
   if (!sess) {
-    sess = { awaitingIdle: false, nudges: 0 }
+    sess = { awaitingIdle: false, nudges: 0, expectedEcho: null }
     sessions.set(sessionID, sess)
     if (sessions.size > MAX_TRACKED_SESSIONS) {
       const oldest = sessions.keys().next().value
@@ -307,15 +323,23 @@ export const CypherTempre = async (input = {}) => {
       if (DISABLED) return
       const sessionID = input.sessionID
       const sess = trackSession(sessions, sessionID)
-      if (isNudgeMessage(output.parts)) {
-        // Our own nudge echoing back: the turn baseline, nudge budget, and
-        // trajectory slice all belong to the still-open turn — touch nothing,
-        // append nothing (the nudge text IS the reminder). Just re-arm the
-        // idle check so the re-prompted pass gets re-audited.
+      if (isNudgeMessage(output.parts, sess.expectedEcho)) {
+        // Our own nudge echoing back (exact match against the outstanding
+        // nonce-bearing text): the turn baseline, nudge budget, and trajectory
+        // slice all belong to the still-open turn — touch nothing, append
+        // nothing (the nudge text IS the reminder). Just re-arm the idle
+        // check so the re-prompted pass gets re-audited.
+        sess.expectedEcho = null
         sess.awaitingIdle = true
-        debug(`chat.message ${sessionID}: nudge message, pass-through`)
+        debug(`chat.message ${sessionID}: nudge echo, pass-through`)
         return
       }
+      if (sess.expectedEcho && lastUserText(output.parts)?.startsWith(NUDGE_SENTINEL)) {
+        // Sentinel-shaped but not our outstanding text — spoof or corruption.
+        // Fall through and treat it as ordinary input; log for diagnosis.
+        debug(`chat.message ${sessionID}: sentinel-prefixed message did NOT match expected echo`)
+      }
+      sess.expectedEcho = null // a real user message supersedes any owed echo
       sess.nudges = 0
       sess.awaitingIdle = true
       // Turn-head baseline first (mark clears any stale turn_trajectory),
@@ -351,7 +375,9 @@ export const CypherTempre = async (input = {}) => {
       const reason = blockReason(await runEnforce("stop-check"))
       if (!reason) return // sealed, dormant, unenforceable, or enforce.py budget exhausted
       sess.nudges++
-      const text = `${NUDGE_SENTINEL}\n${reason}`
+      // Per-send nonce: the echo is authenticated by exact match, so a message
+      // that merely copies the public sentinel can never impersonate a nudge.
+      const text = `${NUDGE_SENTINEL} [${randomUUID()}]\n${reason}`
       try {
         const session = client?.session
         const send = session?.promptAsync?.bind(session) ?? session?.prompt?.bind(session)
@@ -360,6 +386,7 @@ export const CypherTempre = async (input = {}) => {
           return
         }
         await send({ path: { id: sessionID }, body: { parts: [{ type: "text", text }] } })
+        sess.expectedEcho = text // armed only after the send actually succeeded
         debug(`idle ${sessionID}: sent nudge ${sess.nudges}/${maxNudges}`)
       } catch (e) {
         debug(`idle ${sessionID}: nudge send failed (fail-open): ${e}`)
@@ -391,4 +418,5 @@ CypherTempre.internals = {
   runEnforce,
   blockReason,
   isNudgeMessage,
+  lastUserText,
 }
