@@ -79,5 +79,5 @@ If the co-evolver has paused the self-model (python3 ${skillDir}/dormancy.py sta
 }
 
 export function buildReminder(skillDir) {
-  return `[Cypher Tempre] ACTIVE — run the loop and seal before ending: python3 ${skillDir}/recall.py turn "<finding>" --input "<request>". Route task-shaped requests first: python3 ${skillDir}/router.py route "<task>". Context keeps the first turn + recent turns only; the chain is memory — recall, don't assume. (Skip only if dormancy.py status says dormant.)`
+  return `[Cypher Tempre] ACTIVE — run the loop and seal before ending: python3 ${skillDir}/recall.py turn "<finding>" --input "<request>". Route task-shaped requests first: python3 ${skillDir}/router.py route "<task>". Score your own seals (--coherence/--relevance/--novelty/--consistency/--depth/--covenant, 0-255) and declare --used-rings on grounded claims — the lexical proxies are fallbacks, not judges. Context keeps the first turn + recent turns only; the chain is memory — recall, don't assume. (Skip only if dormancy.py status says dormant.)`
 }
