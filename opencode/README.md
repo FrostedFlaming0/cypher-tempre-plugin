@@ -113,7 +113,10 @@ active session on a chain at a time: `mark`/`stop-check` state
 on one root can satisfy each other's stop-check and cross-bind trajectory
 pointers (corrupting training provenance silently). OpenCode **subagent child
 sessions count** — the plugin primes and marks them like any session. Run one
-session at a time per chain; give concurrent agents their own chain roots.
+session at a time per chain; give concurrent agents their own chain roots. A
+corollary: the skill's chainless "instrument" subagent category is **not
+supported on OpenCode** — every child session gets primed and marked, and
+same-root children are barred anyway. Do not spawn subagent sessions here.
 
 ## Install
 
