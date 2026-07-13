@@ -178,6 +178,9 @@ try {
       "with open(here / 'calls.log', 'a') as f: f.write(cmd + '\\n')",
       "if cmd == 'stop-check' and (here / 'mode.txt').read_text().strip() == 'block':",
       "    print(json.dumps({'decision': 'block', 'reason': 'seal the turn: run recall.py turn'}))",
+      "if cmd == 'rehydrate':",
+      "    print('Recent memory (rehydrated - test digest):')",
+      "    print('  #41: prior sealed turn about wallet alpha')",
     ].join("\n"),
   )
   const callsFor = (cmd) =>
@@ -271,6 +274,23 @@ try {
     assert.ok(spoof2.parts[0].text.includes("[Cypher Tempre] ACTIVE"))
     // and the real echo arriving later no longer authenticates (superseded by real input)
     fs.writeFileSync(modeFile, "allow")
+
+    // REHYDRATION: the first message of a fresh session carries the
+    // recent-memory digest beside the full priming; later messages never do
+    fs.writeFileSync(modeFile, "allow")
+    const sidR = "ses_rehydrate_test"
+    const rehydratesBefore = callsFor("rehydrate")
+    const r1 = { message: {}, parts: [text("fresh session start")] }
+    await hooks["chat.message"]({ sessionID: sidR }, r1)
+    assert.ok(r1.parts[0].text.includes("standing instruction"), "first message still primes")
+    assert.ok(r1.parts[0].text.includes("prior sealed turn about wallet alpha"),
+      "first message carries the rehydration digest")
+    assert.equal(callsFor("rehydrate"), rehydratesBefore + 1, "rehydrate runs for the first message")
+    const r2 = { message: {}, parts: [text("second message")] }
+    await hooks["chat.message"]({ sessionID: sidR }, r2)
+    assert.ok(r2.parts[0].text.includes("[Cypher Tempre] ACTIVE"), "second message gets the reminder")
+    assert.ok(!r2.parts[0].text.includes("prior sealed turn"), "digest is first-turn only")
+    assert.equal(callsFor("rehydrate"), rehydratesBefore + 1, "rehydrate never re-runs mid-session")
 
     // kill switch
     fs.writeFileSync(modeFile, "block")

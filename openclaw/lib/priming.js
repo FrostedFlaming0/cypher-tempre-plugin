@@ -7,7 +7,9 @@
  * it (counters, timestamps): that would break the provider prompt cache.
  *
  * The REMINDER is a short per-turn nudge appended near the user message via
- * the `agent_turn_prepare` hook.
+ * the `agent_turn_prepare` hook. The first prepared turn of a session also
+ * carries the recent-memory digest (see lib/rehydrate.js) in the same slot —
+ * per-run content belongs there, never in the PRIMER.
  *
  * Config precedence: plugins.entries["cypher-tempre"].config > CT_OCLAW_* env
  * > defaults.
@@ -24,6 +26,7 @@ export const DEFAULTS = {
   evictionBatch: 1,
   primer: true,
   reminder: true,
+  rehydrate: true,
   skillDir: path.join(os.homedir(), ".openclaw", "skills", "cypher-tempre-self-model"),
 }
 
@@ -37,6 +40,7 @@ export function resolveConfig(pluginConfig = {}) {
     evictionBatch: intOption(cfg.evictionBatch, env["CT_OCLAW_EVICTION_BATCH"], DEFAULTS.evictionBatch),
     primer: boolOption(cfg.primer, DEFAULTS.primer),
     reminder: boolOption(cfg.reminder, DEFAULTS.reminder),
+    rehydrate: env["CT_OCLAW_REHYDRATE"] === "0" ? false : boolOption(cfg.rehydrate, DEFAULTS.rehydrate),
     skillDir: cfg.skillDir || env["CT_OCLAW_SKILL_DIR"] || DEFAULTS.skillDir,
   }
 }

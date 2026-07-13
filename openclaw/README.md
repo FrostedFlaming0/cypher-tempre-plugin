@@ -16,7 +16,12 @@ Two pieces, one plugin:
    **primer** rides `systemPromptAddition` on every run (a constant string,
    so the system-prompt prefix stays prompt-cache-friendly).
 2. **A per-turn reminder** appended near the user message via the
-   `agent_turn_prepare` hook.
+   `agent_turn_prepare` hook. The **first prepared turn of each session** also
+   carries the **recent-memory digest** (`enforce.py rehydrate` — the last ~7
+   sealed cognitive turns) in the same slot, so a fresh session is rehydrated,
+   not merely primed. The digest is per-run content, so it rides here instead
+   of the cache-stable primer; first turn only, fail-open (a missing skill,
+   dead python, or dormant chain just means no digest).
 
 `compact()` is owned by the engine and never summarizes: while the assembled
 view fits, it reports the host-recognized `"below threshold"` /
@@ -45,6 +50,7 @@ Then select the engine and enable the plugin in `openclaw.json`:
           evictionBatch: 1,     // >1 trades a few turns of context for prompt-cache retention
           primer: true,         // constant primer via systemPromptAddition
           reminder: true,       // short per-turn reminder via agent_turn_prepare
+          rehydrate: true,      // first-turn recent-memory digest (enforce.py rehydrate)
           // skillDir: "/custom/path/to/cypher-tempre-self-model",
         },
       },
@@ -54,8 +60,10 @@ Then select the engine and enable the plugin in `openclaw.json`:
 ```
 
 Environment overrides: `CT_OCLAW_KEEP_TURNS`, `CT_OCLAW_TOKEN_CEILING`,
-`CT_OCLAW_EVICTION_BATCH`, `CT_OCLAW_SKILL_DIR`, and `CT_OCLAW_DISABLE=1`
-(turns off primer + reminder; the engine still windows).
+`CT_OCLAW_EVICTION_BATCH`, `CT_OCLAW_SKILL_DIR`, `CT_OCLAW_REHYDRATE=0`
+(digest off; `CT_OCLAW_REHYDRATE_TIMEOUT_MS` / `CT_OCLAW_PYTHON` tune the
+shell-out), and `CT_OCLAW_DISABLE=1` (turns off primer + reminder + digest;
+the engine still windows).
 
 ### If you pin `plugins.allow`
 

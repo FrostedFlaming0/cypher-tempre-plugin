@@ -1,9 +1,13 @@
 import test from "node:test"
 import assert from "node:assert/strict"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 import { estimateTokens, groupTurns, windowFit } from "./lib/window.js"
 import { createEngine } from "./lib/engine.js"
 import { buildPrimer, buildReminder, resolveConfig, ENGINE_ID } from "./lib/priming.js"
+import { createSessionGate, fetchDigest } from "./lib/rehydrate.js"
 import entry from "./index.js"
 
 // ---------------------------------------------------------------------------
@@ -271,7 +275,7 @@ test("entry: registers the context engine and the reminder hook", async () => {
   })
   assert.equal(engine.info.id, ENGINE_ID)
 
-  const reminder = api.calls.hooks.get("agent_turn_prepare")(
+  const reminder = await api.calls.hooks.get("agent_turn_prepare")(
     { prompt: "hi", messages: [], queuedInjections: [] },
     { pluginConfig: {} },
   )
@@ -283,15 +287,122 @@ test("entry: reminder respects config and CT_OCLAW_DISABLE", async () => {
   entry.register(api)
   const handler = api.calls.hooks.get("agent_turn_prepare")
 
-  const off = handler({ prompt: "", messages: [], queuedInjections: [] }, { pluginConfig: { reminder: false } })
+  const off = await handler({ prompt: "", messages: [], queuedInjections: [] }, { pluginConfig: { reminder: false } })
   assert.equal(off, undefined)
 
   process.env["CT_OCLAW_DISABLE"] = "1"
   try {
-    const disabled = handler({ prompt: "", messages: [], queuedInjections: [] }, { pluginConfig: {} })
+    const disabled = await handler({ prompt: "", messages: [], queuedInjections: [] }, { pluginConfig: {} })
     assert.equal(disabled, undefined)
   } finally {
     delete process.env["CT_OCLAW_DISABLE"]
+  }
+})
+
+// ---------------------------------------------------------------------------
+// rehydration — first-turn recent-memory digest
+// ---------------------------------------------------------------------------
+
+/** Fake skill dir whose enforce.py prints a digest for `rehydrate` only. */
+function fakeSkillDir() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ct-oclaw-rehydrate-"))
+  fs.writeFileSync(
+    path.join(dir, "enforce.py"),
+    [
+      "import sys",
+      "if len(sys.argv) > 1 and sys.argv[1] == 'rehydrate':",
+      "    print('Recent memory (rehydrated - oclaw test digest):')",
+      "    print('  #7: prior sealed turn about wallet alpha')",
+    ].join("\n"),
+  )
+  return dir
+}
+
+test("rehydrate: fetchDigest returns the digest, and null when the skill is missing", async () => {
+  const dir = fakeSkillDir()
+  try {
+    const digest = await fetchDigest(dir)
+    assert.ok(digest.includes("oclaw test digest"))
+    assert.equal(await fetchDigest(path.join(dir, "nope")), null)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("rehydrate: session gate fires once per key and never without a key", () => {
+  const gate = createSessionGate()
+  assert.equal(gate("s1"), true)
+  assert.equal(gate("s1"), false)
+  assert.equal(gate("s2"), true)
+  assert.equal(gate(undefined), false)
+  assert.equal(gate(null), false)
+})
+
+test("entry: first prepared turn of a session carries the digest, later turns only the reminder", async () => {
+  const dir = fakeSkillDir()
+  const api = stubApi()
+  entry.register(api)
+  const handler = api.calls.hooks.get("agent_turn_prepare")
+  const event = { prompt: "hi", messages: [], queuedInjections: [] }
+  const cfg = { pluginConfig: { skillDir: dir } }
+  try {
+    const first = await handler(event, { ...cfg, sessionKey: "sess-a" })
+    assert.ok(first.appendContext.includes("oclaw test digest"), "first turn carries the digest")
+    assert.ok(first.appendContext.includes("[Cypher Tempre] ACTIVE"), "reminder still present")
+    assert.ok(
+      first.appendContext.indexOf("oclaw test digest") < first.appendContext.indexOf("[Cypher Tempre] ACTIVE"),
+      "digest precedes the reminder",
+    )
+
+    const second = await handler(event, { ...cfg, sessionKey: "sess-a" })
+    assert.ok(!second.appendContext.includes("oclaw test digest"), "digest is first-turn only")
+    assert.ok(second.appendContext.includes("[Cypher Tempre] ACTIVE"))
+
+    const other = await handler(event, { ...cfg, sessionKey: "sess-b" })
+    assert.ok(other.appendContext.includes("oclaw test digest"), "a new session rehydrates again")
+
+    const unkeyed = await handler(event, { ...cfg })
+    assert.ok(!unkeyed.appendContext.includes("oclaw test digest"), "no session key -> no digest")
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("entry: rehydrate config/env kill switches; digest works without the reminder", async () => {
+  const dir = fakeSkillDir()
+  const event = { prompt: "hi", messages: [], queuedInjections: [] }
+  try {
+    // config off -> reminder only, and the session slot is NOT consumed
+    const api = stubApi()
+    entry.register(api)
+    const handler = api.calls.hooks.get("agent_turn_prepare")
+    const off = await handler(event, { pluginConfig: { skillDir: dir, rehydrate: false }, sessionKey: "s" })
+    assert.ok(!off.appendContext.includes("oclaw test digest"))
+    const on = await handler(event, { pluginConfig: { skillDir: dir }, sessionKey: "s" })
+    assert.ok(on.appendContext.includes("oclaw test digest"), "rehydrate:false does not burn the first-turn slot")
+
+    // env off
+    const api2 = stubApi()
+    entry.register(api2)
+    process.env["CT_OCLAW_REHYDRATE"] = "0"
+    try {
+      const envOff = await api2.calls.hooks.get("agent_turn_prepare")(event, { pluginConfig: { skillDir: dir }, sessionKey: "s" })
+      assert.ok(!envOff.appendContext.includes("oclaw test digest"))
+    } finally {
+      delete process.env["CT_OCLAW_REHYDRATE"]
+    }
+
+    // reminder:false + rehydrate -> digest alone on turn 1, nothing after
+    const api3 = stubApi()
+    entry.register(api3)
+    const h3 = api3.calls.hooks.get("agent_turn_prepare")
+    const digestOnly = await h3(event, { pluginConfig: { skillDir: dir, reminder: false }, sessionKey: "s" })
+    assert.ok(digestOnly.appendContext.includes("oclaw test digest"))
+    assert.ok(!digestOnly.appendContext.includes("[Cypher Tempre] ACTIVE"))
+    const nothing = await h3(event, { pluginConfig: { skillDir: dir, reminder: false }, sessionKey: "s" })
+    assert.equal(nothing, undefined)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
 

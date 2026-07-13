@@ -43,7 +43,12 @@ Fires on every new user message, before the model call.
   `router.py route`, supply your own PoQ scores, declare `--used-rings`
   evidence), the four-tier chronosynaptic fork doctrine, and the context
   discipline ("context truncates; the chain is your memory — seal every turn,
-  recall instead of assuming").
+  recall instead of assuming") — plus the **recent-memory digest**
+  (`enforce.py rehydrate`, the last ~7 sealed cognitive turns), so a fresh
+  session is rehydrated, not merely primed: recency restores continuity
+  (unfinished threads, standing claims) that relevance recall cannot reach at
+  turn 0. First message only; fail-open (a missing skill, dead python, or
+  dormant chain just means no digest).
 - **Every subsequent message**: appends a short **reminder** (~0.5 KB) — run the
   loop, seal before ending, route task-shaped requests, fork on genuine
   decisions.

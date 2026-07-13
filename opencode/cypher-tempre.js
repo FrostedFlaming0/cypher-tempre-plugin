@@ -5,6 +5,13 @@
  *    (full wearing header + fork doctrine) and a short reminder to every
  *    subsequent one, via the `chat.message` hook. The text rides inside the
  *    user message itself — user-voice authority, not harness metadata.
+ *    The first message also carries the recent-memory digest (`enforce.py
+ *    rehydrate`, the last ~7 sealed cognitive turns) so a fresh session is
+ *    REHYDRATED, not merely primed: recency restores continuity (unfinished
+ *    threads, standing claims) that per-turn relevance recall cannot, because
+ *    turn-0 reasoning happens before any recall runs. First turn only —
+ *    re-injecting every turn would bloat the pinned context. Fail-open: a
+ *    missing skill or dead python just means no digest.
  * 2. Truncates the context sent to the model via
  *    `experimental.chat.messages.transform`: pins the first user message
  *    (which carries the full priming), then keeps the most recent N turns
@@ -347,7 +354,14 @@ export const CypherTempre = async (input = {}) => {
       await runEnforce("mark")
       stampTurnTrajectory(sessionID, output?.message?.id ?? input?.messageID)
       const first = !primed.has(sessionID)
-      const block = first ? FULL_PRIMING : REMINDER
+      let block = first ? FULL_PRIMING : REMINDER
+      if (first) {
+        // Rehydrate: recent-memory digest rides beside the priming, first
+        // turn only. enforce.py rehydrate is read-only and prints plain text;
+        // null/"" (missing skill, dead python, dormant, empty chain) -> no digest.
+        const digest = await runEnforce("rehydrate")
+        if (digest) block = `${block}\n\n${digest}`
+      }
       if (!appendToUserParts(output.parts, block)) {
         debug(`chat.message ${sessionID}: no text part, skipped (still unprimed=${first})`)
         return
