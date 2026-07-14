@@ -42,6 +42,11 @@ class HermesPluginTests(unittest.TestCase):
     def setUp(self):
         MODULE._session_context.clear()
         MODULE._primed_sessions.clear()
+        # Hermetic: never read the developer's real ~/.hermes/config.yaml,
+        # where the pinned-window engine may genuinely be selected.
+        patcher = patch.object(MODULE, "_window_engine_selected", return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_registers_runtime_hooks(self):
         ctx = Context()
