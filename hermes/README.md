@@ -32,3 +32,25 @@ remains responsible for seal-then-stream behavior.
 `__init__.py` is kept byte-identical with
 `skills/hermes/cypher-tempre-self-model/hermes-plugin/__init__.py` in the
 genesis repo; a parity test in each repo guards the sync.
+
+## Disable Hermes's competing self-improvement features
+
+The skill is itself a governed self-improvement system (Cambium growth,
+PoQ-gated seals), so disable Hermes's parallel mechanisms — both compete with
+the chain and the background one also trips this plugin's hooks:
+
+```yaml
+# ~/.hermes/config.yaml
+memory:
+  memory_enabled: false          # the chain is the durable memory
+skills:
+  creation_nudge_interval: 0     # no silent background skill-review forks
+```
+
+With a positive interval (default 10), Hermes forks the agent after
+tool-heavy turns, replays the conversation under the same session id, and
+updates the skill library unprompted — an ungated, unsealed self-modification
+that also fires `pre_llm_call`/`post_llm_call` like a real turn, clobbering
+the enforcement baseline and leaving phantom adherence nudges. The skill
+bundle's README documents the full mechanism and softer alternatives
+(`skills.write_approval: true`).
