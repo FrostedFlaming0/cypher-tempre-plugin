@@ -157,6 +157,108 @@ class HermesPluginTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, patch.dict("os.environ", {"CT_HERMES_SKILL_DIR": td}, clear=False):
             self.assertIsNone(MODULE._pre_llm_call(session_id="s", user_message="hello"))
 
+    def test_context_discipline_rides_priming_when_engine_selected(self):
+        with patch.object(MODULE, "_window_engine_selected", return_value=True), \
+             patch.object(MODULE, "_run", return_value=Result("SessionStart", "startup")):
+            MODULE._session_start(session_id="w1")
+        self.assertIn("Context discipline", MODULE._session_context["w1"])
+        self.assertIn("startup", MODULE._session_context["w1"])
+
+
+def turn(i, extra_msgs=0, size=1):
+    msgs = [{"role": "user", "content": f"u{i} " + "x" * size}]
+    msgs.append({"role": "assistant", "content": f"a{i}", "tool_calls": [{"id": f"t{i}"}]})
+    msgs.append({"role": "tool", "tool_call_id": f"t{i}", "content": f"r{i}"})
+    for j in range(extra_msgs):
+        msgs.append({"role": "assistant", "content": f"a{i}.{j}"})
+    return msgs
+
+
+class PinnedWindowEngineTests(unittest.TestCase):
+    def make(self, keep=3, ceiling=256000):
+        with patch.dict(os.environ, {"CT_HERMES_KEEP_TURNS": str(keep),
+                                     "CT_HERMES_TOKEN_CEILING": str(ceiling)}, clear=False):
+            return MODULE.PinnedWindowEngine()
+
+    def convo(self, n_turns):
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(1, n_turns + 1):
+            msgs.extend(turn(i))
+        return msgs
+
+    def test_few_turns_unchanged(self):
+        engine = self.make(keep=5)
+        msgs = self.convo(3)
+        self.assertIs(engine.compress(msgs), msgs)
+        self.assertEqual(engine.compression_count, 0)
+
+    def test_trims_to_window_pinning_head_and_never_splitting_tool_pairs(self):
+        engine = self.make(keep=2)
+        msgs = self.convo(6)
+        out = engine.compress(msgs)
+        self.assertEqual(out[0]["role"], "system")
+        self.assertEqual(out[1]["content"].split()[0], "u1")  # pinned first user msg
+        kept_users = [m["content"].split()[0] for m in out if m["role"] == "user"]
+        self.assertEqual(kept_users, ["u1", "u5", "u6"])
+        for m in out:  # every tool result's call is present in the kept window
+            if m.get("role") == "tool":
+                calls = [c["id"] for km in out if km.get("tool_calls") for c in km["tool_calls"]]
+                self.assertIn(m["tool_call_id"], calls)
+        self.assertEqual(engine.compression_count, 1)
+
+    def test_newest_turn_always_kept_over_ceiling(self):
+        engine = self.make(keep=5, ceiling=1000)
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(1, 4):
+            msgs.extend(turn(i, size=200000))  # each turn far over the ceiling
+        out = engine.compress(msgs)
+        kept_users = [m["content"].split()[0] for m in out if m["role"] == "user"]
+        self.assertEqual(kept_users, ["u1", "u3"])
+
+    def test_ceiling_evicts_below_keep_turns(self):
+        engine = self.make(keep=10, ceiling=1000)
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(1, 7):
+            msgs.extend(turn(i, size=1200))  # ~2 turns fit under 1000 tokens
+        out = engine.compress(msgs)
+        kept_users = [m["content"].split()[0] for m in out if m["role"] == "user"]
+        self.assertLess(len(kept_users), 7)
+        self.assertEqual(kept_users[0], "u1")
+        self.assertEqual(kept_users[-1], "u6")
+
+    def test_should_compress_threshold(self):
+        engine = self.make(ceiling=50000)
+        self.assertFalse(engine.should_compress(None))
+        self.assertFalse(engine.should_compress(49999))
+        self.assertTrue(engine.should_compress(50000))
+
+    def test_update_model_caps_threshold_at_ceiling(self):
+        engine = self.make(ceiling=256000)
+        engine.update_model("m", 128000)
+        self.assertEqual(engine.threshold_tokens, 96000)
+        engine.update_model("m", 1000000)
+        self.assertEqual(engine.threshold_tokens, 256000)
+
+    def test_engine_is_deepcopy_safe(self):
+        import copy
+
+        engine = self.make()
+        clone = copy.deepcopy(engine)
+        clone.compression_count += 1
+        self.assertEqual(engine.compression_count, 0)
+
+    def test_register_offers_engine_when_supported(self):
+        class EngineContext(Context):
+            engine = None
+            def register_context_engine(self, engine):
+                self.engine = engine
+
+        ctx = EngineContext()
+        fake_engine = object()
+        with patch.object(MODULE, "create_context_engine", return_value=fake_engine):
+            MODULE.register(ctx)
+        self.assertIs(ctx.engine, fake_engine)
+
     @unittest.skipUnless(GENESIS_COPY.is_file(), "genesis checkout not present")
     def test_byte_identical_with_genesis_bundle(self):
         ours = (HERE / "__init__.py").read_bytes()

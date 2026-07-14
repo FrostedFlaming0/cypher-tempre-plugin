@@ -33,6 +33,29 @@ remains responsible for seal-then-stream behavior.
 `skills/hermes/cypher-tempre-self-model/hermes-plugin/__init__.py` in the
 genesis repo; a parity test in each repo guards the sync.
 
+## Pinned-window context engine (no compaction, only truncation)
+
+The plugin ships a `ContextEngine` that replaces Hermes's summarizing
+compressor with pure truncation, matching the OpenCode/OpenClaw plugins:
+the system prompt and the first user message are pinned, the most recent
+`CT_HERMES_KEEP_TURNS` turns (default 15) are kept under a
+`CT_HERMES_TOKEN_CEILING` estimated-token budget (default 256000), the
+newest turn always survives, and a turn — a user message plus everything up
+to the next user message — is evicted whole, so tool call/result pairs never
+split. Registration alone is inert; activate it with:
+
+```sh
+hermes config set context.engine cypher-tempre-window
+```
+
+When active, the per-session priming gains a context-discipline instruction
+(truncated context is forgotten — seal to the chain and recall, don't
+assume). Two Hermes-specific behaviors to know: truncation fires when tokens
+cross Hermes's threshold (a lazy window — turns beyond 15 may linger until
+token pressure), and Hermes rotates to a child session after each trim, which
+this plugin handles by re-priming the new session id. Deactivate with
+`hermes config set context.engine compressor`.
+
 ## Disable Hermes's competing self-improvement features
 
 The skill is itself a governed self-improvement system (Cambium growth,

@@ -6,6 +6,24 @@ Entries are newest-first within each section.
 
 ## Hermes plugin
 
+### v0.3.0 — 2026-07-14
+
+Pinned-window context engine — the OpenCode/OpenClaw context discipline,
+native on Hermes. `PinnedWindowEngine` implements Hermes's pluggable
+`ContextEngine` interface with pure truncation (no compaction, no LLM
+summaries): pin the system prompt and first user message, keep the newest
+`CT_HERMES_KEEP_TURNS` turns (default 15) under a `CT_HERMES_TOKEN_CEILING`
+budget (default 256k), always keep the newest turn, and evict whole turns so
+tool call/result pairs never split. Registered automatically but inert until
+`context.engine: cypher-tempre-window` is set in config. When active, the
+session priming carries the context-discipline instruction (truncated
+context is forgotten — seal and recall). Hermes-native trigger semantics:
+the window is enforced lazily at the token threshold
+(min(ceiling, 75% of model context)), and the post-trim session rotation is
+handled by the existing re-prime path. Engine state is plain Python, safe
+for Hermes's per-agent deepcopy. README documents activation, tuning, and
+the differences from the per-request OpenCode window.
+
 ### v0.2.1 — 2026-07-14
 
 Failed rehydration is retried (Codex review finding): a session is marked
