@@ -70,6 +70,41 @@ class HermesPluginTests(unittest.TestCase):
         self.assertEqual(seen, ["session-start", "user-prompt"])
         self.assertEqual(value, {"context": "rehydrated\n\nturn"})
 
+    def test_failed_prime_is_retried_next_turn(self):
+        # A transient session-start failure must not mark the session primed;
+        # the next turn retries and the rehydration context still arrives.
+        seen = []
+        healthy = False
+
+        def fake_run(script, *args, payload=None):
+            seen.append(args[0])
+            if args[0] == "session-start":
+                return Result("SessionStart", "rehydrated") if healthy else None
+            return Result("UserPromptSubmit", "turn")
+
+        with patch.object(MODULE, "_run", side_effect=fake_run):
+            first = MODULE._pre_llm_call(session_id="flaky", user_message="one")
+            healthy = True
+            second = MODULE._pre_llm_call(session_id="flaky", user_message="two")
+        self.assertEqual(first, {"context": "turn"})
+        self.assertEqual(second, {"context": "rehydrated\n\nturn"})
+        self.assertEqual(seen.count("session-start"), 2)
+
+    def test_clean_empty_prime_counts_as_primed(self):
+        # Exit 0 with no context (e.g. a dormant chain) is a completed prime;
+        # session-start must not re-run every turn.
+        seen = []
+
+        def fake_run(script, *args, payload=None):
+            seen.append(args[0])
+            return Result("SessionStart", "") if args[0] == "session-start" else Result("UserPromptSubmit", "turn")
+
+        with patch.object(MODULE, "_run", side_effect=fake_run):
+            MODULE._pre_llm_call(session_id="dormant", user_message="one")
+            MODULE._pre_llm_call(session_id="dormant", user_message="two")
+        self.assertEqual(seen.count("session-start"), 1)
+        self.assertIn("dormant", MODULE._primed_sessions)
+
     def test_session_is_primed_once_per_process(self):
         seen = []
 

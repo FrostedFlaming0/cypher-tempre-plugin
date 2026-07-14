@@ -6,6 +6,17 @@ Entries are newest-first within each section.
 
 ## Hermes plugin
 
+### v0.2.1 — 2026-07-14
+
+Failed rehydration is retried (Codex review finding): a session is marked
+primed only after `session-start` exits cleanly, so a transient failure —
+timeout, skill missing mid-update, nonzero exit — retries on the session's
+next turn instead of losing rehydration until the process restarts. A clean
+exit with empty context (dormant chain) still counts as primed, so
+`session-start` never re-runs every turn. Worst case while broken is one
+extra bounded attempt per turn; a missing skill short-circuits on a stat
+check with no subprocess.
+
 ### v0.2.0 — 2026-07-14
 
 Resumed-session rehydration and hardened hook plumbing. `pre_llm_call` now

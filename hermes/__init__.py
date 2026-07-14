@@ -103,17 +103,25 @@ def _remember_context(session_id: str, context: str) -> None:
 
 
 def _prime_session(session_id: str, payload: dict[str, Any]) -> None:
-    """Run session-start rehydration once per session per process."""
+    """Run session-start rehydration once per session per process.
+
+    A session is marked primed only on a clean exit, so a transient failure
+    (timeout, skill missing mid-update, nonzero exit) is retried on the
+    session's next turn instead of losing rehydration until process restart.
+    A clean exit with empty context (e.g. a dormant chain) still counts as
+    primed — re-running session-start every turn would gain nothing.
+    """
     if session_id in _primed_sessions:
+        return
+    result = _run("enforce.py", "session-start", payload=payload)
+    if not result or result.returncode != 0:
         return
     if len(_primed_sessions) >= _MAX_PRIMED_SESSIONS:
         _primed_sessions.clear()
     _primed_sessions.add(session_id)
-    result = _run("enforce.py", "session-start", payload=payload)
-    if result and result.returncode == 0:
-        context = _additional_context(result.stdout)
-        if context:
-            _remember_context(session_id, context)
+    context = _additional_context(result.stdout)
+    if context:
+        _remember_context(session_id, context)
 
 
 def _session_start(**kwargs: Any) -> None:
