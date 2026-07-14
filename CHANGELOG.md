@@ -1,8 +1,31 @@
 # Changelog
 
-Two plugins live in this repo and version independently: `opencode/`
-(package `1.x`) and `openclaw/` (package `0.x`). Entries are newest-first
-within each section.
+Three plugins live in this repo and version independently: `opencode/`
+(package `1.x`), `openclaw/` (package `0.x`), and `hermes/` (package `0.x`).
+Entries are newest-first within each section.
+
+## Hermes plugin
+
+### v0.2.0 — 2026-07-14
+
+Resumed-session rehydration and hardened hook plumbing. `pre_llm_call` now
+rehydrates any session it has not seen this process (Hermes fires
+`on_session_start` only for brand-new sessions, so resumed sessions previously
+reached their first turn unprimed). Hook payloads forward only the scalar
+fields `enforce.py` reads — `conversation_history` is excluded, so a
+non-serializable message can no longer abort the subprocess and silently drop
+the turn's priming context. The startup-context and primed-session caches are
+bounded, `post_llm_call` drops startup context that never rode a turn, and a
+bad `CT_HERMES_TIMEOUT` falls back to 8s (clamped to 0.25–30s) instead of
+silently disabling the plugin. `__init__.py` is now byte-identical with the
+genesis bundle copy, guarded by a parity test in each repo.
+
+### v0.1.0 — 2026-07-14
+
+Initial Hermes lifecycle plugin: `on_session_start` startup rehydration,
+`pre_llm_call` per-turn marking and priming, `post_llm_call` /
+`subagent_stop` adherence observation. Observer post-turn hooks mean
+best-effort enforcement, not a hard Stop gate.
 
 ## OpenCode plugin
 

@@ -18,8 +18,17 @@ Restart Hermes after enabling the plugin. The default skill location is
 `CT_HERMES_SKILL_DIR`. `CT_HERMES_CHAIN_ROOT` selects a separate writable chain
 root, and `CT_HERMES_PYTHON` selects the Python executable.
 
+Rehydration covers resumed sessions too: Hermes fires `on_session_start` only
+for brand-new sessions, so the plugin also rehydrates from a session's first
+`pre_llm_call` (once per session per process). Hook payloads forward only the
+scalar fields `enforce.py` reads — never `conversation_history`.
+
 Hermes's `post_llm_call` and `subagent_stop` hooks are observers: they can
 record an adherence failure but cannot re-enter the model loop. Consequently,
 the plugin provides automatic wearing and best-effort enforcement, not the
 hard bounded Stop gate available in Claude Code. The injected per-turn primer
 remains responsible for seal-then-stream behavior.
+
+`__init__.py` is kept byte-identical with
+`skills/hermes/cypher-tempre-self-model/hermes-plugin/__init__.py` in the
+genesis repo; a parity test in each repo guards the sync.
