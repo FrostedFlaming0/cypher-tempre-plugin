@@ -1,5 +1,5 @@
 name: cypher-tempre
-version: "0.3.0"
+version: "0.3.1"
 description: Automatic Cypher Tempre Timechain wearing for Hermes sessions.
 hooks:
   - on_session_start

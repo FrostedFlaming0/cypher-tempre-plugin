@@ -253,19 +253,24 @@ class PinnedWindowEngine(_ContextEngineBase):
         except Exception:
             return 20
 
-    def _window_budget(self) -> int:
+    def _window_budget(self, pinned_cost: int) -> int:
         # Land comfortably under the trigger threshold so a trim never
-        # immediately re-triggers; the turn cap usually dominates anyway.
-        if self.threshold_tokens and self.threshold_tokens < self.token_ceiling:
-            return max(1000, int(self.threshold_tokens * 0.6))
-        return self.token_ceiling
+        # immediately re-triggers. The pinned prefix (system prompt + first
+        # user message) spends from the same trigger budget, so it is
+        # subtracted from the tail allowance — a large first message shrinks
+        # the window rather than pushing the total over the threshold. The
+        # newest turn still always survives, so a pinned prefix plus one turn
+        # that together exceed the threshold is irreducible by design.
+        trigger = min(self.threshold_tokens or self.token_ceiling, self.token_ceiling)
+        return max(0, int(trigger * 0.6) - pinned_cost)
 
     def _truncate(self, messages: list) -> list:
         user_idx = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user"]
         if len(user_idx) <= 1:
             return messages
         first_user = user_idx[0]
-        budget = self._window_budget()
+        pinned_cost = sum(self._estimate(messages[i]) for i in range(first_user + 1))
+        budget = self._window_budget(pinned_cost)
 
         tail_start = len(messages)
         total = 0

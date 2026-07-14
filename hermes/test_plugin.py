@@ -231,6 +231,36 @@ class PinnedWindowEngineTests(unittest.TestCase):
         self.assertEqual(kept_users[0], "u1")
         self.assertEqual(kept_users[-1], "u6")
 
+    def test_reducible_transcript_lands_below_trigger(self):
+        # Codex review finding: the tail budget must account for the pinned
+        # prefix, including a large first user message — a reducible
+        # transcript must land below the trigger threshold after one trim.
+        engine = self.make(keep=10, ceiling=1000)
+        msgs = [{"role": "system", "content": "s" * 400},
+                {"role": "user", "content": "u1 " + "x" * 800}]
+        msgs.append({"role": "assistant", "content": "a1 " + "y" * 800})
+        for i in range(2, 6):
+            msgs += [{"role": "user", "content": f"u{i} " + "x" * 800},
+                     {"role": "assistant", "content": f"a{i} " + "y" * 800}]
+        out = engine.compress(msgs)
+        estimate = sum(engine._estimate(m) for m in out)
+        self.assertLessEqual(estimate, engine.threshold_tokens)
+        self.assertEqual(engine.compress(out), out)  # idempotent, not a churn loop
+        kept_users = [m["content"].split()[0] for m in out if m["role"] == "user"]
+        self.assertEqual(kept_users[0], "u1")
+        self.assertEqual(kept_users[-1], "u5")
+
+    def test_irreducible_pinned_prefix_still_keeps_newest_turn(self):
+        engine = self.make(keep=10, ceiling=1000)
+        msgs = [{"role": "system", "content": "s" * 4000},
+                {"role": "user", "content": "u1 " + "x" * 4000}]
+        for i in range(2, 5):
+            msgs += [{"role": "user", "content": f"u{i} " + "x" * 800},
+                     {"role": "assistant", "content": f"a{i}"}]
+        out = engine.compress(msgs)
+        kept_users = [m["content"].split()[0] for m in out if m["role"] == "user"]
+        self.assertEqual(kept_users, ["u1", "u4"])
+
     def test_should_compress_threshold(self):
         engine = self.make(ceiling=50000)
         self.assertFalse(engine.should_compress(None))

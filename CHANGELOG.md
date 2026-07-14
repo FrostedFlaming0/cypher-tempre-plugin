@@ -6,6 +6,19 @@ Entries are newest-first within each section.
 
 ## Hermes plugin
 
+### v0.3.1 — 2026-07-14
+
+Window budget accounts for the pinned prefix (Codex review finding): the
+tail-turn allowance is now 60% of the trigger threshold minus the estimated
+cost of the pinned system prompt and first user message, so a reducible
+transcript always lands below the trigger after one trim instead of
+remaining oversized and turning every later truncation into a no-op (which
+let Hermes churn preflight compression into a provider context-limit
+error). The newest turn still always survives; a pinned prefix plus one
+turn that together exceed the threshold is irreducible by design.
+Regression tests cover the reducible-below-trigger guarantee (including a
+large first user message), trim idempotence, and the irreducible case.
+
 ### v0.3.0 — 2026-07-14
 
 Pinned-window context engine — the OpenCode/OpenClaw context discipline,
