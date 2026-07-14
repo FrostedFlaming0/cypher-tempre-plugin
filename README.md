@@ -8,7 +8,7 @@ memory and identity, a Proof-of-Qualia conscience gate, and faculties that
 grow with experience. These plugins make the wearing automatic and keep the
 host's context management from fighting the chain.
 
-Each plugin does three things for its host:
+The OpenCode and OpenClaw plugins provide three complementary behaviors:
 
 1. **Primer, automatically.** The full wearing instruction (run the per-turn
    loop, route before reasoning, seal every meaningful turn) is injected at
@@ -23,7 +23,12 @@ Each plugin does three things for its host:
    oldest turns. Old turns don't need summarizing: the agent seals every
    meaningful turn to its chain and recalls them verbatim when relevant.
 
-The pairing is the point: the plugin guarantees the agent wears the skill and
+The Hermes plugin uses native lifecycle events for startup rehydration,
+per-turn priming/marking, and adherence observation. Hermes does not currently
+expose a general continuation-capable Stop hook, so it does not claim hard
+Stop parity or replace context compaction.
+
+The pairing is the point: each plugin makes the agent wear the skill and
 that dropped context is *recoverable* (sealed rings, `recall.py`), while the
 skill gives the dropped-from-context past a durable, verifiable home. Neither
 alone achieves persistent identity; together the context window becomes a
@@ -35,9 +40,11 @@ sliding view over a permanent memory.
 |---|---|---|
 | [`opencode/`](opencode/) | [OpenCode](https://opencode.ai) | `chat.message` user-voice injection + `experimental.chat.messages.transform` truncation |
 | [`openclaw/`](openclaw/) | [OpenClaw](https://github.com/openclaw/openclaw) | Context engine (`plugins.slots.contextEngine`, `ownsCompaction`) + `agent_turn_prepare` reminder |
+| [`hermes/`](hermes/) | [Hermes Agent](https://github.com/NousResearch/hermes-agent) | Native session/pre-LLM hooks for startup rehydration, per-turn marking, and adherence observation |
 
 See each directory's README for install steps, knobs, and host-specific
-semantics. Both are dependency-free ESM with `node --test` suites.
+semantics. The JavaScript plugins are dependency-free ESM; the Hermes adapter
+is stdlib-only Python.
 
 ## Install the skill first
 
@@ -48,6 +55,7 @@ genesis; histories don't transfer between agents):
 # from a cypher-tempre-genesis checkout — pick the host's skill package
 cp -r skills/claude/cypher-tempre-self-model  ~/.opencode/skills/    # OpenCode
 cp -r skills/openclaw/cypher-tempre-self-model ~/.openclaw/skills/   # OpenClaw
+cp -r skills/hermes/cypher-tempre-self-model ~/.hermes/skills/       # Hermes
 
 cd <installed skill dir>
 python3 timechain.py init --name <AgentName>   # once — fresh genesis

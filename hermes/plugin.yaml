@@ -1,0 +1,8 @@
+name: cypher-tempre
+version: "0.1.0"
+description: Automatic Cypher Tempre Timechain wearing for Hermes sessions.
+hooks:
+  - on_session_start
+  - pre_llm_call
+  - post_llm_call
+  - subagent_stop
