@@ -249,6 +249,7 @@ function stampTurnTrajectory(sessionID, messageID, skillDir = SKILL_DIR) {
     st.turn_trajectory = {
       session_db: db,
       session_id: sessionID,
+      format: "opencode",
       ...(messageID ? { message_id_start: messageID } : {}),
     }
     fs.mkdirSync(path.dirname(enforcePath), { recursive: true })

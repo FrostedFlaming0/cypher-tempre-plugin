@@ -190,7 +190,7 @@ same-root children are barred anyway. Do not spawn subagent sessions here.
 ## Trajectory stamping (training export)
 
 On every user turn the plugin stamps `turn_trajectory` —
-`{session_db, session_id, message_id_start}` — into the skill's
+`{format: "opencode", session_db, session_id, message_id_start}` — into the skill's
 `chain/.enforce.json`. The skill's seal binds the turn's ring to that pointer
 (`trajectory_ref`), and `training.py export --with-trajectory` in the skill
 repo resolves it into the turn's redacted tool-event slice straight from the

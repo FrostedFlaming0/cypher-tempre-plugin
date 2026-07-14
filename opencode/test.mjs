@@ -330,6 +330,7 @@ try {
   assert.equal(st.turn_head, 7, "existing enforce keys survive the stamp")
   assert.equal(st.turn_trajectory.session_db, fakeDb)
   assert.equal(st.turn_trajectory.session_id, "ses_test")
+  assert.equal(st.turn_trajectory.format, "opencode")
   assert.equal(st.turn_trajectory.message_id_start, "msg_123")
   // no message id -> stamp still lands, without the boundary key
   stampTurnTrajectory("ses_test2", undefined, tmp)
